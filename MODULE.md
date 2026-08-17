@@ -76,7 +76,7 @@ Land new UI/features in:
 
 Path segments `you` · `user` · `user-requested` vs `agent` · `agent-suggested` · `suggested` (nearest wins).  
 API field `origin`; rows get green **you** badge / muted italic **agent** badge; sort you first, agent last.  
-Law: `~/jwrangle/YOU-AGENT.md`.
+Law: local you/ vs agent/ folders.
 
-Standalone AyTree repo remains at `%USERPROFILE%\dev\AyTree` (canonical product tree).  
+Standalone AyTree is a separate product tree.  
 This module is the scanner-hosted copy for day-to-day + feature hooks.
