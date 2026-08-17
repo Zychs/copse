@@ -1,0 +1,4367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AyTree · Artifact Scanner</title>
+  <script>
+  (function () {
+    try {
+      if (new URLSearchParams(location.search || "").get("embedded") === "1") {
+        document.documentElement.setAttribute("data-embedded", "1");
+      }
+    } catch (e) {}
+  })();
+  </script>
+  <style>
+    /* OpenDyslexic (local, served by win_serve.py at /fonts/) = body face. */
+    @font-face {
+      font-family: "OpenDyslexic3";
+      src: url("/fonts/OpenDyslexic3-Regular.ttf") format("truetype");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "OpenDyslexic3";
+      src: url("/fonts/OpenDyslexic3-Bold.ttf") format("truetype");
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      /* dyslexia-first stack; everything rem-based scales off html font-size */
+      --dys: "OpenDyslexic3", "OpenDyslexic", "Lexend", "Segoe UI", system-ui, sans-serif;
+      --dys-mono: "OpenDyslexic3", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+      --bg: #0f0e0a;
+      --bg-soft: #17150d;
+      --text: #f4edcf;
+      --muted: #a99f78;
+      --muted-soft: rgba(169, 159, 120, 0.2);
+      --accent: #c2a334;
+      --accent-strong: #e0be3e;
+      --line: rgba(224, 190, 62, 0.18);
+      --card: #17150d;
+      --folder-color: #e8c55c;
+      --branch-local: #51a351;
+      --branch-remote: #4a90e2;
+      --virtual-color: #9b59b6;
+      --file-color: #a99f78;
+      
+      /* Status Colors */
+      --status-todo: #c2a334;
+      --status-in-progress: #3498db;
+      --status-blocked: #e74c3c;
+      --status-completed: #2ecc71;
+
+      /* Quick-access favorite chips (blue, not green-gold shell) */
+      --qa-blue: #4a90e2;
+      --qa-blue-fill: rgba(74, 144, 226, 0.18);
+      --qa-blue-fill-hover: rgba(74, 144, 226, 0.28);
+      --qa-blue-fill-active: rgba(74, 144, 226, 0.36);
+
+      /* you/ vs agent/ origin (user-requested vs agent-suggested) */
+      --origin-you: #6bcf7f;
+      --origin-you-fill: rgba(107, 207, 127, 0.12);
+      --origin-agent: #8a8070;
+      --origin-agent-fill: rgba(120, 110, 90, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+    /* Root step-up: every rem in this file scales off here (16px → 19px). */
+    html { font-size: 19px; }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--dys);
+      letter-spacing: 0.01em;
+    }
+
+    /* main app — tree OR info is a separate OS window (no side-by-side fight) */
+    .app-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* tree pane (full window when pane=tree) */
+    .tree-pane {
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    html.pane-info .tree-pane { display: none; }
+    html.pane-tree .inspector-pane { display: none; }
+
+    .tree-header {
+      padding: 6px 10px 8px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .brand-section .brand-mark {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .brand-section .brand-mark svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .brand-title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--accent-strong);
+      margin: 0;
+      line-height: 1.1;
+    }
+
+    .brand-subtitle {
+      display: none; /* depth columns need the pixels; hover brand title for hint */
+    }
+
+    /* fzf left · input · quick-folder tabs · blank tab · plus */
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .fzf-label {
+      flex: 0 0 auto;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: lowercase;
+      color: var(--accent-strong);
+      background: rgba(194, 163, 52, 0.12);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 5px 7px;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      user-select: none;
+    }
+
+    .search-input-wrap {
+      flex: 1 1 auto;
+      min-width: 64px;
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(15, 14, 10, 0.6);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-size: 0.8rem;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(194, 163, 52, 0.2);
+    }
+
+    .quick-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: 48%;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .quick-tab {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      max-width: 140px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      border: 1px solid var(--line);
+      background: rgba(15, 14, 10, 0.45);
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      user-select: none;
+    }
+
+    .quick-tab:hover {
+      border-color: rgba(224, 190, 62, 0.4);
+      color: var(--text);
+    }
+
+    .quick-tab.active {
+      border-color: var(--accent);
+      color: var(--accent-strong);
+      background: rgba(194, 163, 52, 0.12);
+    }
+
+    .quick-tab.blank {
+      min-width: 28px;
+      width: 28px;
+      max-width: 28px;
+      padding: 5px 0;
+      justify-content: center;
+      opacity: 0.55;
+      border-style: dashed;
+    }
+
+    .quick-tab.blank:hover {
+      opacity: 0.9;
+    }
+
+    .quick-tab-x {
+      flex: 0 0 auto;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.75rem;
+      line-height: 1;
+      padding: 0 0 0 2px;
+      opacity: 0.6;
+    }
+
+    .quick-tab-x:hover {
+      color: var(--status-blocked);
+      opacity: 1;
+    }
+
+    .quick-tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .path-add-input {
+      flex: 0 1 180px;
+      min-width: 100px;
+      max-width: 240px;
+      background: rgba(15, 14, 10, 0.75);
+      color: var(--text);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      padding: 5px 8px;
+      font-size: 0.72rem;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(194, 163, 52, 0.15);
+    }
+
+    .quick-plus {
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: rgba(194, 163, 52, 0.1);
+      color: var(--accent-strong);
+      font-size: 1.15rem;
+      font-weight: 600;
+      line-height: 1;
+      cursor: pointer;
+      user-select: none;
+      padding: 0;
+    }
+
+    .quick-plus:hover {
+      border-color: var(--accent);
+      background: rgba(194, 163, 52, 0.2);
+    }
+
+    .quick-plus:active {
+      transform: scale(0.96);
+    }
+
+    .tree-scroller {
+      flex: 1;
+      overflow: hidden;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    /*
+     * Depth columns + group gravity + double-space + tab-group indent:
+     * - dataset groups (type bands) alternate L/R hug — not every other line
+     * - 2× rhythm on gaps / row height
+     * - type groups use tab-stops to indent members
+     */
+    :root {
+      --col-tab: 1.25rem;       /* one tab stop for group indent */
+      --col-space: 0.5rem;      /* base unit; double-space uses 2× */
+      --col-space-2: 1rem;
+      --col-gap: 0.3rem;        /* intra-row gap — keep the line one tight cluster */
+    }
+
+    .col-shell {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .col-toolbar {
+      display: flex;
+      align-items: center;
+      gap: var(--col-space-2);
+      padding: var(--col-space) var(--col-space-2);
+      border-bottom: 1px solid var(--line);
+      background: rgba(23, 21, 13, 0.92);
+      flex-shrink: 0;
+      min-height: 0;
+    }
+
+    .col-path {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: 0.68rem;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .col-path b {
+      color: var(--accent-strong);
+      font-weight: 600;
+    }
+
+    .col-depth-meta {
+      flex: 0 0 auto;
+      font-size: 0.62rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .col-sortbar {
+      display: flex;
+      gap: var(--col-space);
+      flex: 0 0 auto;
+    }
+
+    .col-head-btn {
+      appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-align: left;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .col-head-btn:hover {
+      color: var(--accent-strong);
+      background: rgba(194, 163, 52, 0.08);
+    }
+
+    .col-head-btn.active {
+      color: var(--accent-strong);
+      border-color: var(--line);
+    }
+
+    .col-head-btn .sort-ind {
+      opacity: 0.85;
+      margin-left: 1px;
+    }
+
+    .col-browser {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0, 1fr);
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      width: 100%;
+      column-gap: 0;
+    }
+
+    .col-browser.overflow-x {
+      overflow-x: auto;
+      grid-auto-columns: minmax(148px, 1fr);
+    }
+
+    .col-pane {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: var(--bg);
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      container-type: inline-size;
+    }
+
+    .col-pane:last-child {
+      border-right: none;
+    }
+
+    /* Alternate alignment gravity: start (L) / end (R) by depth */
+    .col-pane.grav-start {
+      --grav-align: start;
+      --grav-border: left;
+      --grav-pad-in: var(--col-space-2);
+      --grav-pad-out: var(--col-space);
+      text-align: left;
+    }
+
+    .col-pane.grav-end {
+      --grav-align: end;
+      --grav-border: right;
+      --grav-pad-in: var(--col-space);
+      --grav-pad-out: var(--col-space-2);
+      text-align: right;
+    }
+
+    .col-pane.grav-end .col-crumb {
+      text-align: right;
+    }
+
+    .col-pane.grav-end .col-group-label {
+      text-align: right;
+      flex-direction: row-reverse;
+    }
+
+    .col-pane.grav-end .col-row {
+      justify-content: flex-end; /* whole cluster hugs the right — no internal gap */
+    }
+
+    .col-pane.grav-end .col-row-name {
+      flex-direction: row;
+      justify-content: flex-end;
+    }
+
+    .col-pane.grav-end .col-row.selected,
+    .col-pane.grav-end .col-row.drill {
+      border-left-color: transparent;
+      border-right: 2px solid var(--accent);
+    }
+
+    .col-pane.grav-start .col-row.selected {
+      border-left-color: var(--accent);
+    }
+
+    .col-crumb {
+      font-size: 0.6rem;
+      color: var(--muted);
+      padding: var(--col-space) var(--col-space-2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(224, 190, 62, 0.08);
+      line-height: 1.35;
+    }
+
+    .col-body {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: var(--col-space) 0 var(--col-space-2);
+      min-height: 0;
+      /* tab stops for group indent (grouping uses ch steps of --col-tab) */
+      tab-size: 4;
+    }
+
+    .col-group {
+      margin: 0 0 var(--col-space-2);
+      padding: 0;
+    }
+
+    .col-group:last-child {
+      margin-bottom: var(--col-space);
+    }
+
+    .col-group-label {
+      display: flex;
+      align-items: center;
+      gap: var(--col-space);
+      padding: var(--col-space) var(--col-space-2);
+      /* base + N tabs of group indent */
+      padding-inline-start: calc(var(--col-space-2) + var(--group-tabs, 0) * var(--col-tab));
+      padding-inline-end: var(--col-space-2);
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      opacity: 0.85;
+      user-select: none;
+      border-bottom: 1px solid rgba(224, 190, 62, 0.1);
+      margin-bottom: var(--col-space);
+      min-height: calc(22px * 1.5);
+    }
+
+    .col-group-label .tab-marks {
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      color: var(--muted);
+      opacity: 0.45;
+      letter-spacing: 0;
+      font-weight: 400;
+      white-space: pre;
+    }
+
+    /*
+     * One row = ONE tight string. Flex (not a fixed grid) so icon · name · " -- " ·
+     * type · status pack against each other with a single small gap; the free space
+     * lands OUTSIDE the cluster, on the gravity side, never inside the line.
+     */
+    .col-row {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: var(--col-gap);
+      align-items: center;
+      justify-content: flex-start;
+      /* double-space vertical rhythm */
+      padding-block: var(--col-space);
+      padding-inline-end: var(--col-space-2);
+      /* tab indent by group: groupTabs * tab stop */
+      padding-inline-start: calc(var(--col-space-2) + var(--group-tabs, 0) * var(--col-tab));
+      cursor: pointer;
+      border-left: 2px solid transparent;
+      border-right: 2px solid transparent;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      user-select: none;
+      min-height: calc(22px * 2); /* double-space row height */
+    }
+
+    .col-row:hover {
+      background: rgba(194, 163, 52, 0.08);
+    }
+
+    .col-row.selected {
+      background: rgba(194, 163, 52, 0.16);
+    }
+
+    .col-row.drill {
+      background: rgba(194, 163, 52, 0.1);
+    }
+
+    .col-row-name {
+      display: flex;
+      align-items: center;
+      gap: var(--col-gap);
+      /* shrink-to-fit: the name owns only its own width, never the whole column */
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .col-row-name .node-icon {
+      margin-right: 0;
+      flex-shrink: 0;
+      font-size: 0.95rem;
+      width: 1.1em;
+      text-align: center;
+    }
+
+    .col-row-name .nm {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      /* `pre` (not nowrap) so the trailing " -- " terminator survives */
+      white-space: pre;
+    }
+
+    .col-row-type,
+    .col-row-status {
+      font-size: 0.7rem;
+      color: var(--muted);
+      flex: 0 0 auto;   /* natural width — no reserved column, no dead gap */
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* An empty status cell must not push the line open. */
+    .col-row-status:empty {
+      display: none;
+    }
+
+    .col-row-type {
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .col-row-status .badge {
+      font-size: 0.55rem;
+      padding: 1px 4px;
+    }
+
+    .col-empty {
+      padding: var(--col-space-2);
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-align: center;
+    }
+
+    @container (max-width: 160px) {
+      .col-row-type,
+      .col-row-status {
+        display: none;
+      }
+    }
+
+    .tree-scroller.fzf-mode {
+      overflow-y: auto;
+      padding: var(--col-space-2);
+    }
+
+    /* fzf-style flat result list (active while query non-empty) */
+    .fzf-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .fzf-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      padding: 0 4px 10px;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+
+    .fzf-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      border-left: 3px solid transparent;
+      user-select: none;
+    }
+
+    .fzf-row:hover {
+      background: rgba(194, 163, 52, 0.08);
+    }
+
+    .fzf-row.selected {
+      background: rgba(194, 163, 52, 0.18);
+      border-left-color: var(--accent);
+    }
+
+    .fzf-row .node-icon {
+      flex-shrink: 0;
+      margin-right: 0;
+    }
+
+    .fzf-name {
+      flex: 0 1 auto;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 600;
+    }
+
+    /* end-of-name terminator (" -- ") on fzf rows */
+    .name-sep {
+      flex: 0 0 auto;
+      color: var(--muted);
+      white-space: pre;
+      opacity: 0.8;
+    }
+
+    .fzf-path {
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      text-align: right;
+    }
+
+    .fzf-empty {
+      text-align: center;
+      padding: 40px 16px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .fzf-empty code {
+      color: var(--accent);
+      font-size: 0.85rem;
+    }
+
+    /* inspector pane (own OS window when pane=info — half-height under tree) */
+    .inspector-pane {
+      background: var(--bg-soft);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    html.pane-info .inspector-pane {
+      background: var(--bg-soft);
+    }
+
+    .inspector-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(15, 14, 10, 0.2);
+    }
+
+    .inspector-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      word-break: break-all;
+      margin: 0;
+    }
+
+    .inspector-type {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 4px;
+    }
+
+    .inspector-body {
+      padding: 24px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* CSS tree rendering styles */
+    ul.tree-node-list {
+      list-style: none;
+      padding-left: 20px;
+      margin: 4px 0;
+      position: relative;
+    }
+
+    ul.tree-node-list::before {
+      content: '';
+      position: absolute;
+      left: 6px;
+      top: 0;
+      bottom: 10px;
+      width: 1px;
+      background: var(--line);
+    }
+
+    /* Remove root node line left alignment offset */
+    .tree-scroller > ul.tree-node-list {
+      padding-left: 0;
+    }
+    .tree-scroller > ul.tree-node-list::before {
+      display: none;
+    }
+
+    li.tree-node-item {
+      margin: 2px 0;
+      position: relative;
+    }
+
+    /* Horizontal node link line */
+    li.tree-node-item::before {
+      content: '';
+      position: absolute;
+      left: -14px;
+      top: 13px;
+      width: 10px;
+      height: 1px;
+      background: var(--line);
+    }
+
+    .tree-scroller > ul.tree-node-list > li.tree-node-item::before {
+      display: none;
+    }
+
+    .node-row {
+      display: flex;
+      align-items: center;
+      padding: 5px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+      transition: background-color 0.15s, color 0.15s;
+      font-size: 0.88rem;
+    }
+
+    .node-row:hover {
+      background: rgba(194, 163, 52, 0.08);
+    }
+
+    .node-row.selected {
+      background: rgba(194, 163, 52, 0.15);
+      border-left: 3px solid var(--accent);
+      padding-left: 5px; /* adjust for border */
+    }
+
+    /* Node expansion toggle button */
+    .node-toggle {
+      width: 16px;
+      height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 4px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      transition: transform 0.15s;
+    }
+
+    .node-toggle.collapsed {
+      transform: rotate(-90deg);
+    }
+
+    .node-toggle.leaf {
+      visibility: hidden;
+    }
+
+    .node-icon {
+      margin-right: 8px;
+      font-size: 1rem;
+      display: inline-block;
+    }
+
+    .node-name {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-right: 8px;
+    }
+
+    /* Highlight matching terms on search */
+    .highlight {
+      background: rgba(224, 190, 62, 0.35);
+      color: #fff;
+      border-radius: 2px;
+      padding: 0 2px;
+    }
+
+    /* Badges & Pills */
+    .badge {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .badge-status {
+      border: 1px solid transparent;
+    }
+    .badge-status.todo {
+      color: var(--status-todo);
+      border-color: rgba(194, 163, 52, 0.3);
+      background: rgba(194, 163, 52, 0.05);
+    }
+    .badge-status.in_progress {
+      color: var(--status-in-progress);
+      border-color: rgba(52, 152, 219, 0.3);
+      background: rgba(52, 152, 219, 0.05);
+    }
+    .badge-status.blocked {
+      color: var(--status-blocked);
+      border-color: rgba(231, 76, 60, 0.3);
+      background: rgba(231, 76, 60, 0.05);
+    }
+    .badge-status.completed {
+      color: var(--status-completed);
+      border-color: rgba(46, 204, 113, 0.3);
+      background: rgba(46, 204, 113, 0.05);
+    }
+
+    .badge-current-head {
+      background: rgba(81, 163, 81, 0.15);
+      color: var(--branch-local);
+      border: 1px solid rgba(81, 163, 81, 0.4);
+      margin-left: 6px;
+    }
+
+    /* Inspector fields and forms */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-select-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .status-btn {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+      text-align: center;
+    }
+
+    .status-btn:hover {
+      background: rgba(194, 163, 52, 0.05);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .status-btn.active.todo {
+      background: rgba(194, 163, 52, 0.15);
+      border-color: var(--status-todo);
+      color: var(--status-todo);
+    }
+    .status-btn.active.in_progress {
+      background: rgba(52, 152, 219, 0.15);
+      border-color: var(--status-in-progress);
+      color: var(--status-in-progress);
+    }
+    .status-btn.active.blocked {
+      background: rgba(231, 76, 60, 0.15);
+      border-color: var(--status-blocked);
+      color: var(--status-blocked);
+    }
+    .status-btn.active.completed {
+      background: rgba(46, 204, 113, 0.15);
+      border-color: var(--status-completed);
+      color: var(--status-completed);
+    }
+
+    .notes-textarea {
+      width: 100%;
+      height: 180px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      resize: vertical;
+      outline: none;
+      font-family: inherit;
+    }
+
+    .notes-textarea:focus {
+      border-color: var(--accent);
+    }
+
+    /* General buttons */
+    .btn {
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background-color 0.15s, transform 0.1s;
+      border: none;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-strong);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: var(--muted-soft);
+      border-color: var(--accent);
+    }
+
+    .btn-danger {
+      background: rgba(231, 76, 60, 0.15);
+      border: 1px solid rgba(231, 76, 60, 0.4);
+      color: #e74c3c;
+    }
+
+    .btn-danger:hover {
+      background: rgba(231, 76, 60, 0.25);
+    }
+
+    .action-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 20px;
+    }
+
+    /* Extender sub-forms inside inspector */
+    .extender-form {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .extender-form-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .extender-input {
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    .extender-input:focus {
+      border-color: var(--accent);
+    }
+
+    /* Info cards */
+    .info-card {
+      background: rgba(194, 163, 52, 0.04);
+      border: 1px dashed var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .info-card strong {
+      color: var(--text);
+    }
+
+    /* Branch sneak-peek (info flip) */
+    .branch-peek {
+      margin: 12px 0 4px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.22);
+      overflow: hidden;
+    }
+    .branch-peek-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(194, 163, 52, 0.06);
+    }
+    .branch-peek-head .bp-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--accent-strong);
+    }
+    .branch-peek-head .bp-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+    .branch-peek-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 8px 12px 0;
+    }
+    .bp-chip {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .bp-chip.ahead { color: #7dcea0; border-color: rgba(125, 206, 160, 0.35); }
+    .bp-chip.behind { color: #e8a87c; border-color: rgba(232, 168, 124, 0.35); }
+    .bp-chip.same { color: var(--muted); }
+    .bp-tip {
+      padding: 8px 12px 4px;
+      font-size: 0.82rem;
+      color: var(--text);
+      line-height: 1.35;
+    }
+    .bp-tip .sha {
+      font-family: ui-monospace, monospace;
+      color: var(--branch-remote);
+      font-size: 0.75rem;
+    }
+    .bp-section-label {
+      padding: 10px 12px 4px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      opacity: 0.9;
+    }
+    .bp-commits {
+      list-style: none;
+      margin: 0;
+      padding: 0 12px 8px;
+      max-height: 11rem;
+      overflow: auto;
+    }
+    .bp-commits li {
+      display: grid;
+      grid-template-columns: 4.2rem 4.5rem 1fr;
+      gap: 6px;
+      font-size: 0.72rem;
+      line-height: 1.35;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(224, 190, 62, 0.06);
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+    .bp-commits .h { color: var(--branch-remote); }
+    .bp-commits .d { color: var(--muted); }
+    .bp-commits .s { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bp-stat, .bp-patch {
+      margin: 0 12px 12px;
+      padding: 8px 10px;
+      background: #0a0a08;
+      border: 1px solid rgba(224, 190, 62, 0.12);
+      border-radius: 4px;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      font-size: 0.68rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 14rem;
+      overflow: auto;
+      color: var(--muted);
+    }
+    .bp-patch { max-height: 22rem; color: #c8c4b0; }
+    .bp-patch .add { color: #7dcea0; }
+    .bp-patch .del { color: #e07a7a; }
+    .bp-patch .hdr { color: var(--branch-remote); }
+    .bp-patch .meta { color: var(--accent); }
+    .bp-loading, .bp-err {
+      padding: 12px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .bp-err { color: #e07a7a; }
+    .bp-note {
+      padding: 0 12px 10px;
+      font-size: 0.68rem;
+      color: var(--muted);
+      opacity: 0.85;
+    }
+
+    /* Floating mouse infotip — branch / worktree diff sneak-peek */
+    #branch-infotip {
+      position: fixed;
+      z-index: 9999;
+      display: none;
+      width: min(420px, 92vw);
+      max-height: min(52vh, 420px);
+      overflow: auto;
+      pointer-events: none;
+      background: #14120c;
+      border: 1px solid rgba(224, 190, 62, 0.45);
+      border-radius: 10px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+      color: var(--text);
+      font-size: 0.72rem;
+      line-height: 1.35;
+    }
+    #branch-infotip.show { display: block; }
+    #branch-infotip .bit-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(194, 163, 52, 0.08);
+    }
+    #branch-infotip .bit-title {
+      font-weight: 700;
+      color: var(--accent-strong);
+      letter-spacing: 0.02em;
+    }
+    #branch-infotip .bit-meta { color: var(--muted); font-size: 0.65rem; }
+    #branch-infotip .bit-body { padding: 8px 10px 10px; }
+    #branch-infotip .bit-stat {
+      font-family: var(--dys-mono);
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--muted);
+      max-height: 7rem;
+      overflow: hidden;
+      margin: 0 0 6px;
+    }
+    #branch-infotip .bit-patch {
+      font-family: var(--dys-mono);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 14rem;
+      overflow: hidden;
+      margin: 0;
+      color: #c8c4b0;
+    }
+    #branch-infotip .bit-patch .add { color: #7dcea0; }
+    #branch-infotip .bit-patch .del { color: #e07a7a; }
+    #branch-infotip .bit-patch .hdr { color: var(--branch-remote); }
+    #branch-infotip .bit-patch .meta { color: var(--accent); }
+    #branch-infotip .bit-err { color: #e07a7a; padding: 10px; }
+    #branch-infotip .bit-hint {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.62rem;
+    }
+    .col-row.is-branch { cursor: pointer; }
+    .col-row.is-branch:hover {
+      outline: 1px solid rgba(74, 144, 226, 0.35);
+    }
+
+    /* Modal / empty states */
+    .empty-inspector {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--muted);
+      padding: 60px 24px;
+      gap: 12px;
+    }
+
+    .empty-icon {
+      font-size: 2.5rem;
+      opacity: 0.5;
+    }
+
+    .empty-text {
+      font-size: 0.88rem;
+      max-width: 240px;
+    }
+
+    /* Collapse child container animation/state */
+    .collapsed-container {
+      display: none;
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--line);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--accent);
+    }
+  
+    /* Companion title-only until hover (board Options) */
+    .cth-titlebar { display: none; padding: 12px 16px; font-weight: 700; font-size: 18px; color: var(--accent-strong); background: var(--bg-soft); }
+    .cth-titlebar .hint { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+    html.cth-on:not(.cth-open) body { overflow: hidden; display: flex; flex-direction: column; }
+    html.cth-on:not(.cth-open) body > *:not(.cth-titlebar) { display: none !important; }
+    html.cth-on:not(.cth-open) .cth-titlebar {
+      display: flex; align-items: center; flex: 1 1 auto; min-height: 100%; width: 100%; border: 0;
+    }
+    html.cth-on.cth-open .cth-titlebar { display: none; }
+
+    /* Suite card embed: frame logo is the title — hide article header */
+    html[data-embedded="1"] .tree-header,
+    html[data-embedded="1"] .cth-titlebar {
+      display: none !important;
+    }
+
+    /* ── Quick access rail (pins == quick-folder roots, + recents) ────────── */
+    .tree-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+    .tool-btn {
+      background: rgba(15, 14, 10, 0.6); color: var(--muted);
+      border: 1px solid var(--line); border-radius: 5px;
+      padding: 3px 8px; font-size: 0.7rem; font-family: inherit; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+    }
+    .tool-btn:hover { color: var(--accent-strong); border-color: var(--accent); }
+    .tool-btn.on { color: var(--accent-strong); border-color: var(--accent); background: rgba(194, 163, 52, 0.12); }
+
+    .qa-panel {
+      border-bottom: 1px solid var(--line);
+      background: rgba(23, 21, 13, 0.75);
+      max-height: 28vh; overflow-y: auto; flex-shrink: 0;
+      padding: 6px 8px 8px;
+    }
+    .qa-panel.hidden { display: none; }
+
+    .qa-group-label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); padding: 2px 8px 4px;
+    }
+    .qa-count { opacity: 0.65; }
+    /* Favorites sit side-by-side (wrap), not a vertical stack */
+    .qa-list {
+      list-style: none; margin: 0; padding: 0;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    }
+
+    .qa-item {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 8px; border-radius: 6px; cursor: pointer;
+      user-select: none; font-size: 0.78rem;
+      border: 1.5px solid var(--qa-blue);
+      background: var(--qa-blue-fill);
+      color: #cfe3f8;
+      max-width: 12rem; min-width: 0;
+    }
+    .qa-item:hover { background: var(--qa-blue-fill-hover); border-color: #6aa8ef; }
+    .qa-item.active {
+      background: var(--qa-blue-fill-active);
+      border-color: #8bbcff;
+      box-shadow: 0 0 0 1px rgba(74, 144, 226, 0.35);
+    }
+    .qa-item.missing { opacity: 0.45; }
+    .qa-item.dragging { opacity: 0.4; }
+    .qa-item.drop-target { outline: 2px dashed var(--qa-blue); outline-offset: 1px; }
+
+    .qa-icon { font-size: 0.82rem; flex-shrink: 0; line-height: 1; }
+    .qa-name {
+      color: #d6e8fc; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; min-width: 0; flex: 1 1 auto;
+      font-weight: 600;
+    }
+    .qa-path { display: none; } /* culled: short leaf only */
+    .qa-hint {
+      font-size: 0.55rem; color: #9ec4ef; border: 1px solid rgba(74, 144, 226, 0.45);
+      border-radius: 3px; padding: 0 4px; flex-shrink: 0;
+    }
+    .qa-actions { display: flex; gap: 1px; opacity: 0; flex-shrink: 0; }
+    .qa-item:hover .qa-actions { opacity: 1; }
+    .qa-act {
+      background: none; border: none; color: #9ec4ef; cursor: pointer;
+      font-size: 0.72rem; line-height: 1; padding: 1px 3px; border-radius: 3px;
+    }
+    .qa-act:hover { color: #e8f2ff; background: rgba(74, 144, 226, 0.25); }
+    .qa-empty { padding: 2px 8px 4px; font-size: 0.7rem; color: var(--muted); opacity: 0.8; }
+
+    /*
+     * One folder across two panes; gravity alternates per *dataset group*
+     * (folders / files / branches…), not every other line. Whole group hugs
+     * the same margin. Gravity moves the WHOLE row cluster (justify-content)
+     * — it never opens space between the pieces of one row.
+     */
+    .col-row.grav-l { text-align: left; justify-content: flex-start; }
+    .col-row.grav-r { text-align: right; justify-content: flex-end; }
+    .col-row.grav-r .col-row-name { flex-direction: row; justify-content: flex-end; }
+    .col-row.grav-l.selected, .col-row.grav-l.drill { border-left-color: var(--accent); }
+    .col-row.grav-r.selected, .col-row.grav-r.drill {
+      border-left-color: transparent; border-right-color: var(--accent);
+    }
+    .col-group-label.grav-l { justify-content: flex-start; text-align: left; }
+    .col-group-label.grav-r { justify-content: flex-end; text-align: right; }
+
+    /* Pin star on column rows (hover-revealed) */
+    .node-pin {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: 0.75rem; line-height: 1; padding: 1px 4px; border-radius: 3px;
+      opacity: 0; flex-shrink: 0;
+    }
+    .col-row:hover .node-pin { opacity: 0.7; }
+    .node-pin.pinned { opacity: 1; color: var(--accent-strong); }
+    .node-pin:hover { opacity: 1; color: var(--accent-strong); background: rgba(194, 163, 52, 0.15); }
+
+    /* Right-click menu */
+    .ctx-menu {
+      position: fixed; z-index: 999; min-width: 200px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+      padding: 4px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55); font-size: 0.78rem;
+    }
+    .ctx-menu button {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      background: none; border: none; color: var(--text); font-family: inherit;
+      font-size: 0.78rem; text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer;
+    }
+    .ctx-menu button:hover { background: rgba(194, 163, 52, 0.15); color: var(--accent-strong); }
+    .ctx-menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; }
+
+    @keyframes qa-flash {
+      0% { background: rgba(224, 190, 62, 0.4); }
+      100% { background: transparent; }
+    }
+    .col-row.qa-jumped { animation: qa-flash 1.1s ease-out; }
+
+    /* Origin: you = requested solid; agent = muted cull-bait */
+    .col-row.origin-you,
+    .node-row.origin-you,
+    .fzf-row.origin-you {
+      background: var(--origin-you-fill);
+      box-shadow: inset 3px 0 0 var(--origin-you);
+    }
+    .col-row.origin-agent,
+    .node-row.origin-agent,
+    .fzf-row.origin-agent {
+      background: var(--origin-agent-fill);
+      box-shadow: inset 3px 0 0 var(--origin-agent);
+      opacity: 0.72;
+    }
+    .col-row.origin-agent .nm,
+    .node-row.origin-agent .node-name,
+    .fzf-row.origin-agent .fzf-name {
+      font-style: italic;
+      color: var(--origin-agent) !important;
+    }
+    .badge-origin {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+      flex-shrink: 0;
+      line-height: 1.2;
+    }
+    .badge-origin.you {
+      color: var(--origin-you);
+      border-color: var(--origin-you);
+      background: rgba(107, 207, 127, 0.15);
+    }
+    .badge-origin.agent {
+      color: var(--origin-agent);
+      border-color: var(--origin-agent);
+      background: rgba(120, 110, 90, 0.2);
+    }
+
+  </style>
+</head>
+<body>
+  <div class="cth-titlebar" id="cth-titlebar" aria-hidden="true">AyTree · file browser<span class="hint"> hover to expand</span></div>
+
+  <div class="app-container">
+    
+    <!-- Tree map explorer (own window: /aytree) -->
+    <div class="tree-pane">
+      <div class="tree-header">
+        <div class="brand-section">
+          <div class="brand-mark" title="AyTree · depth columns · select opens info peer">
+            <svg viewBox="0 0 100 100" aria-hidden="true" style="flex-shrink: 0;">
+              <g fill="none" stroke="var(--accent-strong)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 84 L50 26"/><path d="M78 84 L50 26"/>
+                <path d="M22 84 L15 93"/><path d="M22 84 L27 94"/>
+                <path d="M78 84 L85 93"/><path d="M78 84 L73 94"/>
+                <path d="M34 60 L66 60"/>
+              </g>
+              <g fill="none" stroke="var(--branch-local)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M50 26 L40 13"/><path d="M50 26 L60 13"/><path d="M50 26 L50 8"/>
+              </g>
+              <circle cx="50" cy="60" r="5" fill="var(--accent-strong)"/>
+              <g fill="var(--branch-local)"><circle cx="40" cy="13" r="3.5"/><circle cx="60" cy="13" r="3.5"/><circle cx="50" cy="8" r="3.5"/></g>
+            </svg>
+            <h1 class="brand-title">AyTree</h1>
+          </div>
+          <div id="connection-status" class="badge" style="background: rgba(46, 204, 113, 0.15); color: var(--status-completed); border: 1px solid rgba(46, 204, 113, 0.3); font-size:0.65rem; padding:2px 6px;">Connected</div>
+        </div>
+        
+        <div class="search-bar" id="search-bar">
+          <span class="fzf-label" title="Fuzzy find · press /">fzf</span>
+          <div class="search-input-wrap">
+            <input type="text" id="search-input" class="search-input" placeholder="fuzzy find ( / · ↑↓ ↵ )" autocomplete="off" spellcheck="false">
+          </div>
+          <button class="tool-btn" onclick="revealSelectedInExplorer()" title="Open selection in Windows Explorer">🗂 Explorer</button>
+          <button class="tool-btn" onclick="fetchTreeData()" title="Re-scan now">↻ Refresh</button>
+        </div>
+      </div>
+
+      <!-- Quick access rail: pinned roots (click = that folder becomes the tree) -->
+      <div class="qa-panel" id="qa-panel">
+        <ul class="qa-list" id="qa-pin-list"></ul>
+        <div class="qa-empty" id="qa-pin-empty">
+          Nothing pinned — click ☆ on any folder row, or right-click → Pin.
+        </div>
+      </div>
+
+      <div class="tree-scroller" id="tree-container">
+        <!-- Tree dynamically rendered here -->
+        <div style="text-align:center; padding: 40px; color: var(--muted);">Loading file and branch tree...</div>
+      </div>
+    </div>
+    
+    <!-- Inspector (own window: /aytree/info — stacked under tree, same green shell) -->
+    <div class="inspector-pane" id="inspector-container">
+      <div class="empty-inspector">
+        <div class="empty-icon">🌿</div>
+        <div class="empty-text">Click any repository, folder, file, branch, or custom milestone in the tree window above to view metadata, add notes, and map your progress.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Pane mode: tree (default /aytree) vs info (/aytree/info or ?pane=info)
+    const _params = new URLSearchParams(location.search);
+    const _path = (location.pathname || '').replace(/\/$/, '').toLowerCase();
+    const isInfoPane = _params.get('pane') === 'info'
+      || _path.endsWith('/info')
+      || _path.endsWith('/aytree-info')
+      || _path.endsWith('/itree-info');
+    document.documentElement.classList.add(isInfoPane ? 'pane-info' : 'pane-tree');
+    if (isInfoPane) {
+      document.title = 'AyTree · info';
+      const bar = document.getElementById('cth-titlebar');
+      if (bar) bar.innerHTML = 'AyTree · info<span class="hint"> hover to expand</span>';
+    }
+
+    // Cross-window sync (tree ↔ info). Same origin → BroadcastChannel + localStorage.
+    const AYTREE_CH = 'aytree-selection-v1';
+    const AYTREE_LS_KEY = 'aytree_selected_node';
+    let aytreeBc = null;
+    try { aytreeBc = new BroadcastChannel(AYTREE_CH); } catch (e) { aytreeBc = null; }
+
+    function publishSelection(node) {
+      const payload = node
+        ? { type: 'select', node: {
+            name: node.name, type: node.type, path: node.path, rel_path: node.rel_path,
+            key: node.key, id: node.id, status: node.status || 'NONE', notes: node.notes || '',
+            current_branch: node.current_branch || null,
+            repo_path: node.repo_path || null,
+            ref: node.ref || null,
+            is_current: !!node.is_current
+          }, t: Date.now() }
+        : { type: 'clear', t: Date.now() };
+      try { localStorage.setItem(AYTREE_LS_KEY, JSON.stringify(payload)); } catch (e) {}
+      if (aytreeBc) try { aytreeBc.postMessage(payload); } catch (e) {}
+    }
+
+    function publishTreeRefresh() {
+      const payload = { type: 'refresh', t: Date.now() };
+      try { localStorage.setItem('aytree_tree_refresh', String(payload.t)); } catch (e) {}
+      if (aytreeBc) try { aytreeBc.postMessage(payload); } catch (e) {}
+    }
+
+    // Global State
+    let treeData = null;
+    let selectedNode = null;
+    let expandedPaths = new Set();
+    let currentSearchTerm = '';
+    let fzfHits = [];          // ranked [{node, score, namePos, pathPos, hayName, hayPath}]
+    let fzfActiveIndex = 0;    // keyboard cursor in flat list
+    const FZF_MAX = 200;
+
+    // Root tabs: [default] + quick folders — each swaps the entire tree display.
+    // activeQuickPath === '' means the default server SCAN_ROOT tab.
+    const QF_LS = 'aytree_quick_folders_v1';
+    const QF_ACTIVE_LS = 'aytree_quick_folder_active_v1';
+    let quickFolders = [];       // [{path, label}] user-pinned roots
+    let activeQuickPath = '';    // '' = default tab
+    let defaultScanRoot = '';    // filled from API (default_scan_root / scan_root)
+    let pathAddMode = false;     // + / blank → typing a path
+    let treeFetchGen = 0;        // ignore stale responses when switching fast
+    let treeFingerprint = '';    // skip re-render when poll data unchanged
+    let fzfDebounceTimer = null;
+    let rootSwitchTimer = null;
+
+    // Miller columns: path of drilled folders (node refs by path/key)
+    // Column 0 = children of treeData root; col i+1 = children of millerPath[i]
+    let millerPath = [];         // [{path|key, name, type, ...node}]
+    const COL_SORT_LS = 'aytree_col_sort_v1';
+    let colSort = { key: 'name', dir: 1 }; // name | type | status
+    try {
+      const raw = localStorage.getItem(COL_SORT_LS);
+      if (raw) {
+        const o = JSON.parse(raw);
+        if (o && (o.key === 'name' || o.key === 'type' || o.key === 'status')) {
+          colSort = { key: o.key, dir: o.dir === -1 ? -1 : 1 };
+        }
+      }
+    } catch (_) {}
+
+    function saveColSort() {
+      try { localStorage.setItem(COL_SORT_LS, JSON.stringify(colSort)); } catch (_) {}
+    }
+
+    function nodeIdentity(n) {
+      if (!n) return '';
+      return n.path || n.key || n.id || n.name || '';
+    }
+
+    function typeLabel(t) {
+      const m = {
+        repository: 'repo',
+        directory: 'dir',
+        file: 'file',
+        branch_group: 'branches',
+        branch_local: 'local',
+        branch_remote: 'remote',
+        virtual_note: 'note',
+      };
+      return m[t] || (t || '—');
+    }
+
+    /** you | agent | '' from API or path segment (nearest wins). */
+    function nodeOrigin(node) {
+      if (!node) return '';
+      const o = (node.origin || '').toLowerCase();
+      if (o === 'you' || o === 'agent') return o;
+      const raw = String(node.path || node.rel_path || '');
+      const parts = raw.replace(/\\/g, '/').split('/').filter(Boolean);
+      const youN = new Set(['you', 'user', 'user-requested']);
+      const agN = new Set(['agent', 'agent-suggested', 'suggested']);
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i].toLowerCase();
+        if (agN.has(p)) return 'agent';
+        if (youN.has(p)) return 'you';
+      }
+      const nm = String(node.name || '').toLowerCase();
+      if (agN.has(nm)) return 'agent';
+      if (youN.has(nm)) return 'you';
+      return '';
+    }
+
+    function originRank(node) {
+      const o = nodeOrigin(node);
+      if (o === 'you') return 0;
+      if (o === 'agent') return 2;
+      return 1;
+    }
+
+    function appendOriginBadge(parent, node) {
+      const o = nodeOrigin(node);
+      if (!o) return;
+      const b = document.createElement('span');
+      b.className = 'badge badge-origin ' + o;
+      b.textContent = o;
+      b.title = o === 'you'
+        ? 'user-requested (you/)'
+        : 'agent-suggested (agent/) — cull freely';
+      parent.appendChild(b);
+    }
+
+    /** Stable group order for tab-indent grouping inside a column. */
+    const GROUP_ORDER = [
+      'repository',
+      'directory',
+      'branch_group',
+      'branch_local',
+      'branch_remote',
+      'virtual_note',
+      'file',
+    ];
+
+    function groupLabel(type) {
+      const m = {
+        repository: 'repositories',
+        directory: 'folders',
+        branch_group: 'branch sets',
+        branch_local: 'local branches',
+        branch_remote: 'remote branches',
+        virtual_note: 'notes',
+        file: 'files',
+      };
+      return m[type] || typeLabel(type) + 's';
+    }
+
+    /**
+     * Group sorted nodes by type. Each successive group gets +1 tab indent
+     * (tabs as grouping steps — not hierarchy depth).
+     */
+    function groupNodesForTabs(nodes) {
+      const sorted = sortNodes(nodes || []);
+      const buckets = new Map();
+      for (const n of sorted) {
+        const t = n.type || 'file';
+        if (!buckets.has(t)) buckets.set(t, []);
+        buckets.get(t).push(n);
+      }
+      const groups = [];
+      let tab = 0;
+      const seen = new Set();
+      for (const t of GROUP_ORDER) {
+        if (!buckets.has(t)) continue;
+        groups.push({ type: t, label: groupLabel(t), tabs: tab, nodes: buckets.get(t) });
+        seen.add(t);
+        tab += 1; // one tab stop deeper per group band
+      }
+      for (const [t, list] of buckets) {
+        if (seen.has(t)) continue;
+        groups.push({ type: t, label: groupLabel(t), tabs: tab, nodes: list });
+        tab += 1;
+      }
+      return groups;
+    }
+
+    function tabMarks(n) {
+      // Visible mono tab marks (·→) for “indent by grouping”
+      if (!n) return '';
+      return Array(n + 1).join('→ ');
+    }
+
+    function sortNodes(nodes) {
+      const list = Array.isArray(nodes) ? nodes.slice() : [];
+      const dir = colSort.dir;
+      const key = colSort.key;
+      const typeRank = (t) => {
+        // folders/repos first, then groups, then files — stable scaffold under any sort
+        if (t === 'directory' || t === 'repository') return 0;
+        if (t === 'branch_group') return 1;
+        if (t === 'branch_local' || t === 'branch_remote') return 2;
+        if (t === 'virtual_note') return 3;
+        return 4;
+      };
+      list.sort((a, b) => {
+        // you/ before plain before agent/ (cull-bait last)
+        const or = originRank(a) - originRank(b);
+        if (or !== 0) return or;
+        // Keep type groups mildly preferred so columns stay scannable
+        const tr = typeRank(a.type) - typeRank(b.type);
+        if (tr !== 0 && key === 'name') return tr;
+        let av;
+        let bv;
+        if (key === 'type') {
+          av = typeLabel(a.type);
+          bv = typeLabel(b.type);
+        } else if (key === 'status') {
+          av = (a.status || '').toLowerCase();
+          bv = (b.status || '').toLowerCase();
+        } else {
+          av = (a.name || '').toLowerCase();
+          bv = (b.name || '').toLowerCase();
+        }
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+        // tie-break name
+        const an = (a.name || '').toLowerCase();
+        const bn = (b.name || '').toLowerCase();
+        if (an < bn) return -1;
+        if (an > bn) return 1;
+        return 0;
+      });
+      return list;
+    }
+
+    function setColSort(key) {
+      if (colSort.key === key) {
+        colSort.dir = colSort.dir === 1 ? -1 : 1;
+      } else {
+        colSort.key = key;
+        colSort.dir = 1;
+      }
+      saveColSort();
+      renderTree();
+    }
+
+    /** Prefer container that yields more visible depth (repo > fat dir > any kids). */
+    function pickDepthDrill(nodes) {
+      const list = sortNodes(nodes || []);
+      const withKids = list.filter((n) => n && n.children && n.children.length > 0);
+      if (!withKids.length) return null;
+      const score = (n) => {
+        let s = (n.children && n.children.length) || 0;
+        if (n.type === 'repository') s += 80;
+        else if (n.type === 'directory') s += 40;
+        else if (n.type === 'branch_group') s += 20;
+        // Prefer non-dot dirs when scores close
+        if (n.name && !String(n.name).startsWith('.')) s += 15;
+        return s;
+      };
+      withKids.sort((a, b) => score(b) - score(a));
+      return withKids[0];
+    }
+
+    /**
+     * Auto-open depth columns so the viewport shows hierarchy, not one fat list.
+     * Traditional trees hide depth behind expand; we surface it as side-by-side columns.
+     * Target ~3–5 depth panes depending on width (min dead space).
+     */
+    function autoOpenDepthColumns() {
+      // No-op since the browser shows ONE folder across two panes: auto-drilling
+      // would drop you inside a subfolder you never picked. Depth is a click.
+    }
+
+    function depthPathLabel() {
+      const parts = [];
+      if (treeData) parts.push(treeData.name || abbreviatePath(treeData.scan_root || treeData.path || 'root'));
+      for (const n of millerPath) parts.push(n.name || '…');
+      return parts;
+    }
+
+    function findChildByIdentity(parent, id) {
+      if (!parent || !parent.children) return null;
+      const k = normalizePathKey(id);
+      for (const c of parent.children) {
+        if (normalizePathKey(nodeIdentity(c)) === k) return c;
+      }
+      return null;
+    }
+
+    function millerColumnNodes() {
+      // Returns array of { parent, nodes, selectedId, crumb }
+      if (!treeData) return [];
+      const cols = [];
+      let parent = treeData;
+      cols.push({
+        parent,
+        nodes: sortNodes(parent.children || []),
+        selectedId: millerPath[0] ? nodeIdentity(millerPath[0]) : '',
+        crumb: parent.name || abbreviatePath(parent.path || parent.scan_root || 'root'),
+      });
+      for (let i = 0; i < millerPath.length; i++) {
+        const drilled = millerPath[i];
+        // Re-resolve from live tree so poll refresh stays accurate
+        const live = findChildByIdentity(parent, nodeIdentity(drilled)) || drilled;
+        if (!live || !live.children) break;
+        parent = live;
+        cols.push({
+          parent,
+          nodes: sortNodes(parent.children || []),
+          selectedId: millerPath[i + 1] ? nodeIdentity(millerPath[i + 1]) : (
+            selectedNode && normalizePathKey(nodeIdentity(selectedNode)) !== normalizePathKey(nodeIdentity(live))
+              ? nodeIdentity(selectedNode)
+              : ''
+          ),
+          crumb: live.name || '…',
+        });
+        // If selected leaf lives under this parent and is not a drill, highlight only
+      }
+      return cols;
+    }
+
+    function drillOrSelect(colIndex, node) {
+      const hasKids = node.children && node.children.length > 0;
+      const isContainer = hasKids || node.type === 'directory' || node.type === 'repository'
+        || node.type === 'branch_group';
+      selectNode(node, true);
+      if (isContainer && hasKids) {
+        millerPath = millerPath.slice(0, colIndex);
+        millerPath[colIndex] = node;
+        millerPath = millerPath.filter(Boolean);
+        // After user drill, open one more depth if it would otherwise leave a sparse edge
+        const tail = pickDepthDrill(node.children);
+        if (tail && tail.children && tail.children.length > 0 && millerPath.length < 6) {
+          // only auto-continue if the next level is a "pass-through" fat container (e.g. src)
+          // — keep calm: user click owns the path; no extra auto after manual drill
+        }
+        renderTree();
+      } else {
+        // leaf: keep path through this column's parent, clear deeper
+        millerPath = millerPath.slice(0, colIndex);
+        renderTree();
+      }
+    }
+
+    function fingerprintTree(node, acc, depth) {
+      if (!node || depth > 8) return;
+      acc.push(nodeIdentity(node), node.type || '', node.status || '', node.name || '', node.origin || '');
+      if (node.children) {
+        acc.push(String(node.children.length));
+        for (const c of node.children) fingerprintTree(c, acc, depth + 1);
+      }
+    }
+
+    function treeDataFingerprint(data) {
+      if (!data) return '';
+      const acc = [data.scan_root || '', data.path || ''];
+      fingerprintTree(data, acc, 0);
+      return acc.join('|');
+    }
+
+    function abbreviatePath(p) {
+      if (!p) return 'default';
+      let s = String(p).replace(/\//g, '\\');
+      s = s.replace(/^([A-Za-z]:)\\Users\\[^\\]+/i, '~');
+      s = s.replace(/^\/home\/[^/]+/, '~');
+      if (s.length <= 22) return s.replace(/\\/g, '/');
+      const parts = s.replace(/\\/g, '/').split('/').filter(Boolean);
+      if (parts.length <= 2) return s.replace(/\\/g, '/');
+      const head = parts[0] === '~' ? '~' : parts[0];
+      const leaf = parts[parts.length - 1];
+      return `${head}/…/${leaf}`;
+    }
+
+    /** Favorite chip label: leaf folder only (cull long/path twins). */
+    function shortFolderLabel(p) {
+      if (!p) return 'default';
+      let s = String(p).replace(/\//g, '\\').replace(/\\+$/, '');
+      if (!s) return 'default';
+      // Drive root → "C:"
+      if (/^[A-Za-z]:$/i.test(s)) return s.toUpperCase();
+      const parts = s.split('\\').filter(Boolean);
+      const leaf = parts[parts.length - 1] || s;
+      // Home dir alone → ~
+      if (/^[A-Za-z]:\\Users\\[^\\]+$/i.test(s) || /^\/home\/[^/]+$/i.test(String(p).replace(/\\/g, '/'))) {
+        return '~';
+      }
+      return leaf;
+    }
+
+    function loadQuickFolders() {
+      try {
+        const raw = localStorage.getItem(QF_LS);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            quickFolders = arr
+              .filter((x) => x && x.path)
+              .map((x) => ({
+                path: String(x.path),
+                label: shortFolderLabel(x.path),
+              }));
+          }
+        }
+      } catch (_) {
+        quickFolders = [];
+      }
+      try {
+        activeQuickPath = localStorage.getItem(QF_ACTIVE_LS) || '';
+      } catch (_) {
+        activeQuickPath = '';
+      }
+    }
+
+    function saveQuickFolders() {
+      try {
+        localStorage.setItem(QF_LS, JSON.stringify(quickFolders));
+        localStorage.setItem(QF_ACTIVE_LS, activeQuickPath || '');
+      } catch (_) {}
+    }
+
+    function normalizePathKey(p) {
+      return String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+    }
+
+    function isDefaultRootActive() {
+      return !activeQuickPath || (
+        defaultScanRoot &&
+        normalizePathKey(activeQuickPath) === normalizePathKey(defaultScanRoot)
+      );
+    }
+
+    function makeTabEl({ label, title, active, onClick, onRemove }) {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'quick-tab' + (active ? ' active' : '');
+      tab.title = title || label;
+      const lab = document.createElement('span');
+      lab.className = 'quick-tab-label';
+      lab.textContent = label;
+      tab.appendChild(lab);
+      if (onRemove) {
+        const x = document.createElement('span');
+        x.className = 'quick-tab-x';
+        x.textContent = '×';
+        x.title = 'Remove quick folder';
+        x.addEventListener('click', (e) => {
+          e.stopPropagation();
+          onRemove();
+        });
+        tab.appendChild(x);
+      }
+      tab.addEventListener('click', onClick);
+      return tab;
+    }
+
+    function renderQuickTabs() {
+      if (isInfoPane) return;
+      const host = document.getElementById('quick-tabs');
+      if (!host) return;
+      host.innerHTML = '';
+
+      // Tab 0 — always the default scan root (full tree interchange #1)
+      const defLabel = defaultScanRoot
+        ? shortFolderLabel(defaultScanRoot)
+        : 'default';
+      host.appendChild(makeTabEl({
+        label: defLabel,
+        title: defaultScanRoot ? `Default root · ${defaultScanRoot}` : 'Default scan root',
+        active: isDefaultRootActive(),
+        onClick: () => switchRoot(''),
+      }));
+
+      // User quick folders — each is a full interchangeable tree root.
+      // A pin equal to the default root keeps its rail entry but gets no second
+      // tab (tab 0 already is that root).
+      quickFolders.forEach((qf, idx) => {
+        if (defaultScanRoot && normalizePathKey(qf.path) === normalizePathKey(defaultScanRoot)) return;
+        const active = !isDefaultRootActive()
+          && normalizePathKey(qf.path) === normalizePathKey(activeQuickPath);
+        host.appendChild(makeTabEl({
+          label: shortFolderLabel(qf.path),
+          title: qf.path,
+          active,
+          onClick: () => switchRoot(qf.path),
+          onRemove: () => removeQuickFolder(idx),
+        }));
+      });
+
+      // Blank tab + path entry
+      if (!pathAddMode) {
+        const blank = document.createElement('button');
+        blank.type = 'button';
+        blank.className = 'quick-tab blank';
+        blank.title = 'New quick folder — type a path';
+        blank.setAttribute('aria-label', 'Blank tab — add quick folder');
+        blank.addEventListener('click', startPathAdd);
+        host.appendChild(blank);
+      } else {
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'path-add-input';
+        inp.id = 'path-add-input';
+        inp.placeholder = 'C:\\path\\to\\dir  or  ~/…';
+        inp.autocomplete = 'off';
+        inp.spellcheck = false;
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commitPathAdd(inp.value);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelPathAdd();
+          }
+        });
+        inp.addEventListener('input', () => {
+          const ab = abbreviatePath(inp.value.trim());
+          inp.title = ab ? `${ab}  ←  ${inp.value.trim()}` : '';
+        });
+        host.appendChild(inp);
+        requestAnimationFrame(() => {
+          try { inp.focus(); } catch (_) {}
+        });
+      }
+    }
+
+    function startPathAdd() {
+      if (isInfoPane) return;
+      pathAddMode = true;
+      renderQuickTabs();
+    }
+
+    function cancelPathAdd() {
+      pathAddMode = false;
+      renderQuickTabs();
+    }
+
+    function resetTreeViewForRootSwitch() {
+      // Entire AyTree display swaps — drop selection / fzf / columns from prior root
+      selectedNode = null;
+      currentSearchTerm = '';
+      fzfHits = [];
+      fzfActiveIndex = 0;
+      expandedPaths = new Set();
+      millerPath = [];
+      treeFingerprint = '';
+      const si = document.getElementById('search-input');
+      if (si) si.value = '';
+      try { publishSelection(null); } catch (_) {}
+    }
+
+    async function commitPathAdd(raw) {
+      let path = String(raw || '').trim().replace(/^["']|["']$/g, '');
+      if (!path) {
+        cancelPathAdd();
+        return;
+      }
+      // Validate + resolve via tree API (server expanduser + resolve)
+      let resolved = path;
+      let data = null;
+      try {
+        const q = new URLSearchParams({ root: path });
+        const res = await fetch('/api/aytree/tree?' + q.toString());
+        data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) {
+          const err = (data && data.error) || `not a directory (${res.status})`;
+          alert('Quick folder: ' + err);
+          const inp = document.getElementById('path-add-input');
+          if (inp) inp.focus();
+          return;
+        }
+        resolved = data.scan_root || path;
+        if (data.default_scan_root) defaultScanRoot = data.default_scan_root;
+      } catch (e) {
+        alert('Quick folder: could not reach API');
+        return;
+      }
+      // Don't pin a duplicate of the default root as a "quick" tab
+      if (defaultScanRoot && normalizePathKey(resolved) === normalizePathKey(defaultScanRoot)) {
+        pathAddMode = false;
+        await switchRoot('');
+        return;
+      }
+      const key = normalizePathKey(resolved);
+      const existing = quickFolders.findIndex((q) => normalizePathKey(q.path) === key);
+      const entry = { path: resolved, label: shortFolderLabel(resolved) };
+      if (existing >= 0) {
+        quickFolders[existing] = entry;
+      } else {
+        quickFolders.push(entry);
+      }
+      pathAddMode = false;
+      saveQuickFolders();
+      await switchRoot(resolved, data);
+    }
+
+    function removeQuickFolder(idx) {
+      const gone = quickFolders[idx];
+      quickFolders.splice(idx, 1);
+      const wasActive = gone && normalizePathKey(gone.path) === normalizePathKey(activeQuickPath);
+      saveQuickFolders();
+      if (wasActive) {
+        switchRoot('');
+      } else {
+        renderQuickTabs();
+      }
+    }
+
+    async function switchRoot(path, prefetchedTree) {
+      const next = path || '';
+      if (normalizePathKey(next) === normalizePathKey(activeQuickPath || '')
+          && treeData
+          && !prefetchedTree) {
+        // Already on this root — still re-render tabs (active chrome) only
+        renderQuickTabs();
+        return;
+      }
+      // Debounce rapid tab mashing — only the last root sticks
+      if (rootSwitchTimer) {
+        clearTimeout(rootSwitchTimer);
+        rootSwitchTimer = null;
+      }
+      activeQuickPath = next;
+      saveQuickFolders();
+      resetTreeViewForRootSwitch();
+      renderQuickTabs();
+
+      const apply = async () => {
+        if (normalizePathKey(activeQuickPath || '') !== normalizePathKey(next)) return;
+        if (prefetchedTree && prefetchedTree.path) {
+          treeData = prefetchedTree;
+          treeFingerprint = treeDataFingerprint(treeData);
+          if (treeData.path) expandedPaths.add(treeData.path);
+          if (treeData.default_scan_root) defaultScanRoot = treeData.default_scan_root;
+          else if (!activeQuickPath && treeData.scan_root) defaultScanRoot = treeData.scan_root;
+          autoOpenDepthColumns();
+          if (!isInfoPane) {
+            renderQuickTabs();
+            renderTree();
+          }
+          return;
+        }
+        await fetchTreeData();
+      };
+
+      if (prefetchedTree) {
+        await apply();
+      } else {
+        rootSwitchTimer = setTimeout(() => {
+          rootSwitchTimer = null;
+          apply();
+        }, 90);
+      }
+    }
+
+    // ── Quick access rail ────────────────────────────────────────────────────
+    // The rail and the tab strip are ONE list: a pinned folder is a quick-folder
+    // root. Pins persist server-side (notes DB) instead of localStorage-only, so
+    // both AyTree windows and a restart see the same folders. Clicking a pin
+    // reveals it in the current tree when it lives there, else switches root.
+    let pinsApiOk = true;
+    let pinPushTimer = null;
+    const QA_HIDDEN_LS = 'aytree_qa_hidden';
+
+    function isPinnable(node) {
+      return !!(node && node.path && (node.type === 'directory' || node.type === 'repository'));
+    }
+
+    function isPinned(path) {
+      const k = normalizePathKey(path);
+      return quickFolders.some(q => normalizePathKey(q.path) === k);
+    }
+
+    function pathInsideActiveRoot(path) {
+      const root = treeData && treeData.scan_root;
+      if (!root) return false;
+      const a = normalizePathKey(path), b = normalizePathKey(root);
+      return a === b || a.startsWith(b.replace(/\\?$/, '\\'));
+    }
+
+    // Server is the source of truth; local list is the fast-boot mirror.
+    async function hydratePins() {
+      try {
+        const res = await fetch('/api/aytree/pins');
+        if (!res.ok) throw new Error('pins api ' + res.status);
+        const data = await res.json();
+        const items = (data.items || []).filter(i => i && i.path);
+        if (items.length) {
+          quickFolders = items.map(i => ({ path: i.path, label: shortFolderLabel(i.path) }));
+          try { localStorage.setItem(QF_LS, JSON.stringify(quickFolders)); } catch (e) {}
+        } else if (quickFolders.length) {
+          pushPinsNow();   // migrate this window's localStorage folders up
+        }
+        pinsApiOk = true;
+      } catch (e) {
+        pinsApiOk = false;  // older win_serve — rail still works, localStorage only
+      }
+      if (!isInfoPane) {
+        renderQuickTabs();
+        renderQuickAccess();
+      }
+    }
+
+    async function pushPinsNow() {
+      if (!pinsApiOk) return;
+      try {
+        await fetch('/api/aytree/pins', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'replace',
+            items: quickFolders.map(q => ({ path: q.path, name: q.label || '' }))
+          })
+        });
+        const t = Date.now();
+        try { localStorage.setItem('aytree_pins_refresh', String(t)); } catch (e) {}
+        if (aytreeBc) try { aytreeBc.postMessage({ type: 'pins', t }); } catch (e) {}
+      } catch (e) {
+        pinsApiOk = false;
+      }
+    }
+
+    function schedulePinPush() {
+      clearTimeout(pinPushTimer);
+      pinPushTimer = setTimeout(pushPinsNow, 250);
+    }
+
+    // Grok's tab strip owns quickFolders; mirror every write to the server + rail.
+    const _qfSaveLocal = saveQuickFolders;
+    saveQuickFolders = function () {
+      _qfSaveLocal();
+      if (!isInfoPane) renderQuickAccess();
+      schedulePinPush();
+    };
+
+    function pinPath(path, label) {
+      if (!path || isPinned(path)) return;
+      // Always short leaf; ignore long labels from callers
+      quickFolders.push({ path, label: shortFolderLabel(path) });
+      saveQuickFolders();
+      renderQuickTabs();
+      refreshPinStars();
+    }
+
+    function unpinPath(path) {
+      const k = normalizePathKey(path);
+      const idx = quickFolders.findIndex(q => normalizePathKey(q.path) === k);
+      if (idx < 0) return;
+      removeQuickFolder(idx);   // handles active-root fallback + save
+      renderQuickAccess();
+      refreshPinStars();
+    }
+
+    function togglePin(node) {
+      if (!node || !node.path) return;
+      if (isPinned(node.path)) unpinPath(node.path);
+      else pinPath(node.path, shortFolderLabel(node.path));
+    }
+
+    function pinSelected() {
+      if (selectedNode && isPinnable(selectedNode)) togglePin(selectedNode);
+      else if (treeData && treeData.scan_root) pinPath(treeData.scan_root);
+    }
+
+    async function openInExplorer(path) {
+      if (!path) return;
+      try {
+        const res = await fetch('/api/reveal?path=' + encodeURIComponent(path) + '&mode=explorer');
+        const data = await res.json();
+        if (!data.ok) alert('Could not open: ' + (data.error || path));
+      } catch (e) {
+        alert('Explorer open failed (is win_serve running?)');
+      }
+    }
+
+    function revealSelectedInExplorer() {
+      const p = (selectedNode && selectedNode.path) || (treeData && treeData.scan_root);
+      if (p) openInExplorer(p);
+    }
+
+    // Chain of nodes from the current root down to `target` (inclusive).
+    function nodeChainTo(target) {
+      const chain = [];
+      const k = normalizePathKey(target);
+      function walk(node, trail) {
+        if (node.path && normalizePathKey(node.path) === k) {
+          chain.push(...trail, node);
+          return true;
+        }
+        if (node.children) {
+          for (const c of node.children) if (walk(c, trail.concat([node]))) return true;
+        }
+        return false;
+      }
+      if (treeData) walk(treeData, []);
+      return chain;
+    }
+
+    // One click: inside this root → drill the columns to it; outside → make it
+    // the root (that is what "add a dir" means here).
+    async function revealPath(path) {
+      if (!path) return;
+      if (!pathInsideActiveRoot(path)) {
+        if (!isPinned(path)) pinPath(path);
+        await switchRoot(path);
+        return;
+      }
+      const chain = nodeChainTo(path);
+      if (!chain.length) { await switchRoot(path); return; }
+      const target = chain[chain.length - 1];
+      const hasKids = !!(target.children && target.children.length);
+      millerPath = chain.slice(1, hasKids ? undefined : -1);
+      selectedNode = target;
+      publishSelection(target);
+      renderTree();
+      let row = null;
+      document.querySelectorAll('.col-row[data-path]').forEach(r => {
+        if (!row && normalizePathKey(r.dataset.path) === normalizePathKey(path)) row = r;
+      });
+      if (row) {
+        row.classList.add('qa-jumped');
+        row.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+        setTimeout(() => row.classList.remove('qa-jumped'), 1200);
+      }
+    }
+
+    function qaItemDom(entry, kind) {
+      const li = document.createElement('li');
+      const active = kind === 'pin' && treeData && treeData.scan_root
+        && normalizePathKey(entry.path) === normalizePathKey(treeData.scan_root);
+      li.className = 'qa-item' + (active ? ' active' : '') + (entry.exists === false ? ' missing' : '');
+      li.dataset.path = entry.path;
+      li.title = entry.path + (active ? '  (current root)' : '');
+
+      const icon = document.createElement('span');
+      icon.className = 'qa-icon';
+      icon.textContent = entry.exists === false ? '⚠️' : (entry.is_git ? '📦' : '📁');
+      li.appendChild(icon);
+
+      // Short leaf only — no twin path text
+      const name = document.createElement('span');
+      name.className = 'qa-name';
+      name.textContent = shortFolderLabel(entry.path);
+      li.appendChild(name);
+
+      if (active) {
+        const hint = document.createElement('span');
+        hint.className = 'qa-hint';
+        hint.textContent = 'root';
+        li.appendChild(hint);
+      }
+
+      const actions = document.createElement('span');
+      actions.className = 'qa-actions';
+
+      const openBtn = document.createElement('button');
+      openBtn.className = 'qa-act';
+      openBtn.title = 'Open in Windows Explorer';
+      openBtn.textContent = '🗂';
+      openBtn.addEventListener('click', (e) => { e.stopPropagation(); openInExplorer(entry.path); });
+      actions.appendChild(openBtn);
+
+      const drop = document.createElement('button');
+      drop.className = 'qa-act';
+      drop.title = 'Unpin this folder';
+      drop.textContent = '✕';
+      drop.addEventListener('click', (e) => { e.stopPropagation(); unpinPath(entry.path); });
+      actions.appendChild(drop);
+      li.appendChild(actions);
+
+      li.addEventListener('click', () => revealPath(entry.path));
+
+      if (kind === 'pin') {
+        li.draggable = true;
+        li.addEventListener('dragstart', (e) => {
+          li.classList.add('dragging');
+          try { e.dataTransfer.setData('text/plain', entry.path); } catch (_) {}
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        li.addEventListener('dragend', () => {
+          li.classList.remove('dragging');
+          document.querySelectorAll('.qa-item.drop-target').forEach(n => n.classList.remove('drop-target'));
+        });
+        li.addEventListener('dragover', (e) => {
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          li.classList.add('drop-target');
+        });
+        li.addEventListener('dragleave', () => li.classList.remove('drop-target'));
+        li.addEventListener('drop', (e) => {
+          e.preventDefault();
+          li.classList.remove('drop-target');
+          let from = '';
+          try { from = e.dataTransfer.getData('text/plain'); } catch (_) {}
+          reorderPins(from, entry.path);
+        });
+      }
+      return li;
+    }
+
+    function reorderPins(fromPath, toPath) {
+      if (!fromPath || normalizePathKey(fromPath) === normalizePathKey(toPath)) return;
+      const fi = quickFolders.findIndex(q => normalizePathKey(q.path) === normalizePathKey(fromPath));
+      const ti = quickFolders.findIndex(q => normalizePathKey(q.path) === normalizePathKey(toPath));
+      if (fi < 0 || ti < 0) return;
+      const [moved] = quickFolders.splice(fi, 1);
+      quickFolders.splice(ti, 0, moved);
+      saveQuickFolders();
+      renderQuickTabs();
+    }
+
+    function renderQuickAccess() {
+      if (isInfoPane) return;
+      const pinList = document.getElementById('qa-pin-list');
+      if (!pinList) return;
+      const pinEmpty = document.getElementById('qa-pin-empty');
+
+      pinList.innerHTML = '';
+      quickFolders.forEach(q => pinList.appendChild(qaItemDom({
+        path: q.path, name: shortFolderLabel(q.path)
+      }, 'pin')));
+      if (pinEmpty) pinEmpty.style.display = quickFolders.length ? 'none' : 'block';
+    }
+
+    function refreshPinStars() {
+      document.querySelectorAll('.node-pin[data-path]').forEach(btn => {
+        const on = isPinned(btn.dataset.path);
+        btn.classList.toggle('pinned', on);
+        btn.textContent = on ? '★' : '☆';
+        btn.title = on ? 'Unpin this folder' : 'Pin as quick folder / root';
+      });
+    }
+
+    function toggleQuickAccess() {
+      const panel = document.getElementById('qa-panel');
+      const btn = document.getElementById('qa-toggle');
+      if (!panel) return;
+      const hide = !panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', hide);
+      if (btn) btn.classList.toggle('on', !hide);
+      try { localStorage.setItem(QA_HIDDEN_LS, hide ? '1' : '0'); } catch (e) {}
+    }
+
+    function copyToClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+        return;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    function closeContextMenu() {
+      document.querySelectorAll('.ctx-menu').forEach(m => m.remove());
+    }
+
+    function openContextMenu(evt, node) {
+      evt.preventDefault();
+      closeContextMenu();
+      const menu = document.createElement('div');
+      menu.className = 'ctx-menu';
+      const add = (label, fn) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.addEventListener('click', () => { closeContextMenu(); fn(); });
+        menu.appendChild(b);
+      };
+      const sep = () => menu.appendChild(document.createElement('hr'));
+
+      if (isPinnable(node)) {
+        add(isPinned(node.path) ? '★ Unpin folder' : '☆ Pin as quick folder', () => togglePin(node));
+        add('⤓ Open as root', () => switchRoot(node.path));
+      }
+      if (node.path) {
+        add('🗂 Open in Explorer', () => openInExplorer(node.path));
+        if (node.type === 'file') {
+          add('📄 Open file', () => { fetch('/api/reveal?path=' + encodeURIComponent(node.path) + '&mode=app').catch(() => {}); });
+        }
+        add('⧉ Copy path', () => copyToClipboard(node.path));
+      }
+      if (node.type === 'directory' || node.type === 'repository') {
+        sep();
+        add('＋ New folder here…', async () => {
+          const name = prompt('New folder inside ' + node.name + ':');
+          if (!name) return;
+          try {
+            const res = await fetch('/api/aytree/extend', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'create_folder', parent_path: node.path, folder_name: name })
+            });
+            const data = await res.json();
+            if (!data.success) return alert('Error: ' + data.error);
+            publishTreeRefresh();
+            await fetchTreeData();
+          } catch (e) {
+            alert('Network error while creating folder');
+          }
+        });
+      }
+      document.body.appendChild(menu);
+      const w = menu.offsetWidth, h = menu.offsetHeight;
+      menu.style.left = Math.min(evt.clientX, window.innerWidth - w - 8) + 'px';
+      menu.style.top = Math.min(evt.clientY, window.innerHeight - h - 8) + 'px';
+    }
+
+    window.addEventListener('click', closeContextMenu);
+    window.addEventListener('blur', closeContextMenu);
+
+    loadQuickFolders();
+
+    // ── fzf-style fuzzy match ──────────────────────────────────────────────
+    // Sequential char match (chars need not be contiguous). Bonuses: run,
+    // word boundary, camelCase, prefix/exact. O(len(text) * len(query)).
+    function fzfMatch(query, text) {
+      if (!query) return { score: 0, positions: [] };
+      if (!text) return null;
+      const ql = query.toLowerCase();
+      const tl = text.toLowerCase();
+      const n = ql.length;
+      const m = tl.length;
+      if (n > m) return null;
+
+      // Exact / substring fast paths (still record positions)
+      if (tl === ql) {
+        return { score: 1000 + Math.max(0, 40 - m), positions: [...Array(n).keys()] };
+      }
+      const sub = tl.indexOf(ql);
+      if (sub >= 0) {
+        let s = 200 + Math.max(0, 30 - sub) + Math.max(0, 20 - (m - n));
+        if (sub === 0) s += 40;
+        else if (isWordBoundary(text, sub)) s += 24;
+        const positions = [];
+        for (let i = 0; i < n; i++) positions.push(sub + i);
+        return { score: s, positions };
+      }
+
+      // Fuzzy: for each query char, pick best next index (prefer consecutive / boundary)
+      const positions = [];
+      let score = 0;
+      let ti = 0;
+      let prev = -1;
+      let run = 0;
+      for (let qi = 0; qi < n; qi++) {
+        const qc = ql[qi];
+        let bestJ = -1;
+        let bestLocal = -Infinity;
+        // scan remaining text; prefer nearby consecutive, then boundaries
+        for (let j = ti; j < m; j++) {
+          if (tl[j] !== qc) continue;
+          let local = 10;
+          if (prev >= 0 && j === prev + 1) local += 18 + run * 2;
+          if (j === 0) local += 14;
+          else if (isWordBoundary(text, j)) local += 12;
+          else if (isCamelBump(text, j)) local += 9;
+          // slight preference for earlier in string
+          local -= j * 0.15;
+          // case match
+          if (text[j] === query[qi]) local += 1;
+          // first match wins on equal score (leftmost)
+          if (local > bestLocal) {
+            bestLocal = local;
+            bestJ = j;
+            // strong consecutive take immediately
+            if (prev >= 0 && j === prev + 1) break;
+          }
+        }
+        if (bestJ < 0) return null;
+        if (prev >= 0 && bestJ === prev + 1) run++;
+        else run = 0;
+        if (prev >= 0) {
+          const gap = bestJ - prev - 1;
+          if (gap > 0) score -= Math.min(gap * 1.5, 10);
+        }
+        score += bestLocal;
+        positions.push(bestJ);
+        prev = bestJ;
+        ti = bestJ + 1;
+      }
+      // Prefer denser / shorter haystacks slightly
+      score -= Math.min(m * 0.08, 12);
+      return { score, positions };
+    }
+
+    function isWordBoundary(text, j) {
+      if (j === 0) return true;
+      return /[\/\\_\-\s\.\[\](){}]/.test(text[j - 1]);
+    }
+
+    function isCamelBump(text, j) {
+      if (j === 0) return false;
+      return /[a-z]/.test(text[j - 1]) && /[A-Z]/.test(text[j]);
+    }
+
+    /** Multi-token: space-separated tokens all must match (fzf extended-ish). */
+    function fzfMatchQuery(query, text) {
+      const tokens = query.trim().split(/\s+/).filter(Boolean);
+      if (!tokens.length) return { score: 0, positions: [] };
+      let total = 0;
+      const allPos = new Set();
+      for (const tok of tokens) {
+        const r = fzfMatch(tok, text);
+        if (!r) return null;
+        total += r.score;
+        r.positions.forEach((p) => allPos.add(p));
+      }
+      return { score: total / tokens.length, positions: [...allPos].sort((a, b) => a - b) };
+    }
+
+    function highlightPositions(text, positions) {
+      if (!positions || !positions.length) return escapeHtml(text);
+      const set = new Set(positions);
+      let out = '';
+      let i = 0;
+      while (i < text.length) {
+        if (!set.has(i)) {
+          let j = i + 1;
+          while (j < text.length && !set.has(j)) j++;
+          out += escapeHtml(text.slice(i, j));
+          i = j;
+        } else {
+          let j = i + 1;
+          while (j < text.length && set.has(j)) j++;
+          out += `<span class="highlight">${escapeHtml(text.slice(i, j))}</span>`;
+          i = j;
+        }
+      }
+      return out;
+    }
+
+    function nodeHaystacks(node) {
+      const name = node.name || '';
+      const path = node.path || node.key || node.id || '';
+      // Prefer path-relative display under scan root when path is absolute
+      let rel = path;
+      if (treeData && treeData.path && path.startsWith(treeData.path)) {
+        rel = path.slice(treeData.path.length).replace(/^[\\/]/, '') || name;
+      }
+      const notes = (node.notes || '').slice(0, 200);
+      return { name, path, rel, notes, hay: [name, rel, notes].filter(Boolean).join(' ') };
+    }
+
+    function flattenTree(node, out) {
+      if (!node) return out;
+      out.push(node);
+      if (node.children) {
+        for (const c of node.children) flattenTree(c, out);
+      }
+      return out;
+    }
+
+    function runFzf(query) {
+      if (!treeData || !query) {
+        fzfHits = [];
+        fzfActiveIndex = 0;
+        return;
+      }
+      const nodes = flattenTree(treeData, []);
+      const hits = [];
+      for (const node of nodes) {
+        const h = nodeHaystacks(node);
+        // Score primarily against name+rel (fzf file finder feel); notes as soft fallthrough
+        const primary = fzfMatchQuery(query, h.name + ' ' + h.rel);
+        let score = null;
+        let namePos = [];
+        let pathPos = [];
+        if (primary) {
+          score = primary.score;
+          const nm = fzfMatchQuery(query, h.name);
+          const pm = fzfMatchQuery(query, h.rel);
+          namePos = nm ? nm.positions : [];
+          pathPos = pm ? pm.positions : [];
+          // Prefer name hits over path-only
+          if (nm) score += 6;
+        } else if (h.notes) {
+          const nm = fzfMatchQuery(query, h.notes);
+          if (!nm) continue;
+          score = nm.score * 0.55;
+        } else {
+          continue;
+        }
+        hits.push({
+          node,
+          score,
+          namePos,
+          pathPos,
+          hayName: h.name,
+          hayPath: h.rel,
+        });
+      }
+      hits.sort((a, b) => b.score - a.score || a.hayName.length - b.hayName.length);
+      fzfHits = hits.slice(0, FZF_MAX);
+      // Keep selection if still in hits; else pin top
+      if (selectedNode) {
+        const idx = fzfHits.findIndex((h) => sameNode(h.node, selectedNode));
+        fzfActiveIndex = idx >= 0 ? idx : 0;
+      } else {
+        fzfActiveIndex = 0;
+      }
+    }
+
+    function sameNode(a, b) {
+      if (!a || !b) return false;
+      if (a.key && b.key && a.key === b.key) return true;
+      if (a.id && b.id && a.id === b.id) return true;
+      if (a.path && b.path && a.path === b.path && !a.key && !b.key && !a.id && !b.id) return true;
+      return false;
+    }
+
+    // Load expanded paths from localStorage
+    try {
+      const saved = localStorage.getItem('intuitree_expanded');
+      if (saved) {
+        expandedPaths = new Set(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn("Could not load expanded state: ", e);
+    }
+
+    // Helper: Save expanded paths
+    function saveExpandedState() {
+      try {
+        localStorage.setItem('intuitree_expanded', JSON.stringify(Array.from(expandedPaths)));
+      } catch (e) {
+        console.warn("Could not save expanded state: ", e);
+      }
+    }
+
+    // Fetch tree for the active root tab (default or a quick folder).
+    // quiet=true: background poll — skip DOM rebuild when fingerprint unchanged.
+    async function fetchTreeData(opts) {
+      const quiet = !!(opts && opts.quiet);
+      const gen = ++treeFetchGen;
+      const wantedRoot = activeQuickPath || '';
+      try {
+        let url = '/api/aytree/tree';
+        if (wantedRoot) {
+          url += '?' + new URLSearchParams({ root: wantedRoot }).toString();
+        }
+        const response = await fetch(url);
+        const data = await response.json().catch(() => null);
+        // Stale response after a faster tab switch — drop it
+        if (gen !== treeFetchGen) return;
+        if (normalizePathKey(activeQuickPath || '') !== normalizePathKey(wantedRoot)) return;
+        if (!response.ok || (data && data.ok === false)) {
+          throw new Error((data && data.error) || 'API request failed');
+        }
+
+        const fp = treeDataFingerprint(data);
+        const unchanged = quiet && fp && fp === treeFingerprint && treeData;
+
+        // Remember default root path for tab 0 label
+        if (data.default_scan_root) {
+          defaultScanRoot = data.default_scan_root;
+        } else if (!wantedRoot && data.scan_root) {
+          defaultScanRoot = data.scan_root;
+        }
+
+        // If we asked for a quick root, pin the resolved path (expanduser etc.)
+        if (wantedRoot && data.scan_root) {
+          const key = normalizePathKey(wantedRoot);
+          const idx = quickFolders.findIndex((q) => normalizePathKey(q.path) === key
+            || normalizePathKey(q.path) === normalizePathKey(data.scan_root));
+          if (idx >= 0 && normalizePathKey(quickFolders[idx].path) !== normalizePathKey(data.scan_root)) {
+            quickFolders[idx].path = data.scan_root;
+            quickFolders[idx].label = shortFolderLabel(data.scan_root);
+            activeQuickPath = data.scan_root;
+            saveQuickFolders();
+          }
+        }
+
+        treeData = data;
+        treeFingerprint = fp;
+
+        // Reconcile miller path against fresh tree (drop broken drills)
+        if (millerPath.length) {
+          const nextPath = [];
+          let parent = treeData;
+          for (const step of millerPath) {
+            const live = findChildByIdentity(parent, nodeIdentity(step));
+            if (!live || !live.children) break;
+            nextPath.push(live);
+            parent = live;
+          }
+          millerPath = nextPath;
+        } else if (!quiet) {
+          // Fresh root / first paint: open depth columns so space shows hierarchy
+          autoOpenDepthColumns();
+        }
+
+        if (treeData && treeData.path) {
+          expandedPaths.add(treeData.path);
+        }
+
+        if (!isInfoPane) {
+          if (!unchanged) {
+            renderQuickTabs();
+            renderQuickAccess();   // active-root chip follows the tree
+            renderTree();
+          }
+        }
+
+        // Re-highlight selection only if it still lives under this root
+        if (selectedNode) {
+          const fresh = findNodeByPathOrKey(treeData, selectedNode.path, selectedNode.key || selectedNode.id);
+          if (fresh) {
+            if (!quiet || !unchanged) {
+              selectNode(fresh, false, isInfoPane);
+              if (!isInfoPane) publishSelection(fresh);
+            }
+          } else {
+            selectedNode = null;
+          }
+        }
+        const conn = document.getElementById('connection-status');
+        if (conn) {
+          const rootHint = (treeData && treeData.scan_root) ? abbreviatePath(treeData.scan_root) : '';
+          conn.textContent = rootHint ? `Connected · ${rootHint}` : 'Connected';
+          conn.title = (treeData && treeData.scan_root) || '';
+          conn.style.cssText = 'background: rgba(46, 204, 113, 0.15); color: var(--status-completed); border: 1px solid rgba(46, 204, 113, 0.3);';
+        }
+      } catch (err) {
+        if (gen !== treeFetchGen) return;
+        console.error("Error fetching tree data:", err);
+        if (isInfoPane) return;
+        if (quiet && treeData) return; // keep last good view on poll failure
+        const tc = document.getElementById('tree-container');
+        if (tc) {
+          tc.innerHTML = `
+          <div style="color: var(--status-blocked); padding: 20px; border: 1px dashed var(--line); border-radius: 6px; text-align: center;">
+            <strong>Tree load failed</strong><br>
+            <span style="font-size: 0.8rem; color: var(--muted);">${escapeHtml(String(err.message || err))}</span>
+            <button class="btn btn-secondary" style="margin-top: 12px; width: 100%;" onclick="fetchTreeData()">Retry</button>
+          </div>
+        `;
+        }
+        const conn = document.getElementById('connection-status');
+        if (conn) {
+          conn.textContent = 'Disconnected';
+          conn.style.cssText = 'background: rgba(231, 76, 60, 0.15); color: var(--status-blocked); border: 1px solid rgba(231, 76, 60, 0.3);';
+        }
+      }
+    }
+
+    // Recursively find a node by its path, key, or virtual ID
+    function findNodeByPathOrKey(node, path, uniqueId) {
+      if (node.path === path && !uniqueId) return node;
+      if (uniqueId && (node.key === uniqueId || node.id === uniqueId)) return node;
+      
+      if (node.children) {
+        for (const child of node.children) {
+          const result = findNodeByPathOrKey(child, path, uniqueId);
+          if (result) return result;
+        }
+      }
+      return null;
+    }
+
+    // Render: Miller columns (default) or fzf flat list when querying
+    function renderTree() {
+      if (isInfoPane) return;
+      const container = document.getElementById('tree-container');
+      if (!treeData || !container) return;
+
+      if (currentSearchTerm) {
+        container.classList.add('fzf-mode');
+        renderFzfList(container);
+        return;
+      }
+      container.classList.remove('fzf-mode');
+      renderColumnBrowser(container);
+    }
+
+    function sortInd(key) {
+      if (colSort.key !== key) return '';
+      return colSort.dir === 1 ? ' ▲' : ' ▼';
+    }
+
+    // Two columns, one folder. The active directory's contents flow across the
+    // two panes (first half left, second half right); depth is reached by
+    // drilling, never by growing a third column. Gravity alternates per
+    // dataset group (type band: folders, files, branches…) — whole group same
+    // margin — not every other line.
+    const MAX_COLS = 2;
+
+    function renderColumnBrowser(container) {
+      container.innerHTML = '';
+      if (!treeData) return;
+      const cols = millerColumnNodes();
+      const current = cols.length ? cols[cols.length - 1] : null;
+      const rawNodes = current ? (current.nodes || []) : [];
+      // Group first so gravity + labels follow dataset bands, not line index.
+      const groups = groupNodesForTabs(rawNodes);
+      const flat = [];
+      groups.forEach((g, gi) => {
+        const grav = gi % 2 === 0 ? 'grav-l' : 'grav-r';
+        (g.nodes || []).forEach((node, ni) => {
+          flat.push({
+            node,
+            grav,
+            groupType: g.type,
+            groupLabel: g.label,
+            groupTabs: g.tabs,
+            groupStart: ni === 0,
+          });
+        });
+      });
+      const nodes = flat.map((e) => e.node);
+      const crumbs = depthPathLabel();
+
+      const shell = document.createElement('div');
+      shell.className = 'col-shell';
+
+      // Toolbar: breadcrumb (click a crumb to climb back out) + count + sort
+      const toolbar = document.createElement('div');
+      toolbar.className = 'col-toolbar';
+
+      const pathEl = document.createElement('div');
+      pathEl.className = 'col-path';
+      crumbs.forEach((part, i) => {
+        if (i) {
+          const sep = document.createElement('span');
+          sep.style.opacity = '0.45';
+          sep.textContent = ' › ';
+          pathEl.appendChild(sep);
+        }
+        const crumb = document.createElement('span');
+        if (i === crumbs.length - 1) {
+          const b = document.createElement('b');
+          b.textContent = part;
+          crumb.appendChild(b);
+        } else {
+          crumb.textContent = part;
+          crumb.style.cursor = 'pointer';
+          crumb.title = 'Back to ' + part;
+          crumb.addEventListener('click', () => {
+            millerPath = millerPath.slice(0, i);
+            renderTree();
+          });
+        }
+        pathEl.appendChild(crumb);
+      });
+      pathEl.title = crumbs.join(' / ');
+      toolbar.appendChild(pathEl);
+
+      const meta = document.createElement('div');
+      meta.className = 'col-depth-meta';
+      meta.textContent = `${nodes.length} item${nodes.length === 1 ? '' : 's'}`;
+      meta.title = 'This folder only — contents split across two columns; gravity by type group';
+      toolbar.appendChild(meta);
+
+      const sortbar = document.createElement('div');
+      sortbar.className = 'col-sortbar';
+      ['name', 'type', 'status'].forEach((key) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'col-head-btn' + (colSort.key === key ? ' active' : '');
+        btn.innerHTML = `${key}<span class="sort-ind">${sortInd(key)}</span>`;
+        btn.title = `Sort by ${key}`;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setColSort(key);
+        });
+        sortbar.appendChild(btn);
+      });
+      toolbar.appendChild(sortbar);
+      shell.appendChild(toolbar);
+
+      const browser = document.createElement('div');
+      browser.className = 'col-browser';
+
+      if (!flat.length) {
+        const empty = document.createElement('div');
+        empty.className = 'col-empty';
+        empty.textContent = 'Empty folder.';
+        browser.appendChild(empty);
+      } else {
+        const half = Math.ceil(flat.length / MAX_COLS);
+        const drillIndex = millerPath.length;
+        [flat.slice(0, half), flat.slice(half)].forEach((chunk) => {
+          const pane = document.createElement('div');
+          pane.className = 'col-pane';
+          const body = document.createElement('div');
+          body.className = 'col-body';
+          let lastGroupType = null;
+          chunk.forEach((entry) => {
+            // Group header when a dataset band starts (or continues in pane 2)
+            if (entry.groupStart || entry.groupType !== lastGroupType) {
+              const lab = document.createElement('div');
+              lab.className = 'col-group-label ' + entry.grav;
+              lab.style.setProperty('--group-tabs', String(entry.groupTabs || 0));
+              const marks = document.createElement('span');
+              marks.className = 'tab-marks';
+              marks.textContent = tabMarks(entry.groupTabs || 0);
+              lab.appendChild(marks);
+              const txt = document.createElement('span');
+              txt.textContent = entry.groupLabel || groupLabel(entry.groupType);
+              lab.appendChild(txt);
+              body.appendChild(lab);
+              lastGroupType = entry.groupType;
+            }
+            body.appendChild(makeColRow(entry.node, entry.grav, drillIndex));
+          });
+          pane.appendChild(body);
+          browser.appendChild(pane);
+        });
+      }
+
+      shell.appendChild(browser);
+      container.appendChild(shell);
+    }
+
+    // One line. `grav` is the whole dataset group's hug (grav-l | grav-r);
+    // `drillIndex` is the depth this listing sits at, so a click drills from here.
+    function makeColRow(node, grav, drillIndex) {
+      const row = document.createElement('div');
+      const id = nodeIdentity(node);
+      const isSel = selectedNode
+        && normalizePathKey(nodeIdentity(selectedNode)) === normalizePathKey(id);
+      const isDrill = millerPath[drillIndex]
+        && normalizePathKey(nodeIdentity(millerPath[drillIndex])) === normalizePathKey(id);
+      const hug = (grav === 'grav-r') ? 'grav-r' : 'grav-l';
+      const origin = nodeOrigin(node);
+      row.className = 'col-row ' + hug
+        + (isSel ? ' selected' : '')
+        + (isDrill && !isSel ? ' drill' : '')
+        + (origin ? ' origin-' + origin : '');
+
+      const nameCell = document.createElement('div');
+      nameCell.className = 'col-row-name';
+      const ic = nodeIconFor(node);
+      const icon = document.createElement('span');
+      icon.className = 'node-icon';
+      icon.innerHTML = ic.html;
+      icon.style.color = ic.color;
+      nameCell.appendChild(icon);
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.style.color = ic.color;
+      // Name string is terminated by " -- " right after its last character, so the
+      // eye gets a hard end-of-string marker before the type/status columns.
+      nm.textContent = (node.name || '') + ' -- ';
+      if (node.is_current) nm.textContent += '· HEAD';
+      nameCell.appendChild(nm);
+      appendOriginBadge(nameCell, node);
+      row.appendChild(nameCell);
+
+      const typeCell = document.createElement('div');
+      typeCell.className = 'col-row-type';
+      typeCell.textContent = typeLabel(node.type);
+      row.appendChild(typeCell);
+
+      // Status cell stays for grid alignment but renders nothing when unset —
+      // an em dash on every line is noise, not information.
+      const stCell = document.createElement('div');
+      stCell.className = 'col-row-status';
+      if (node.status && node.status !== 'NONE') {
+        const badge = document.createElement('span');
+        badge.className = `badge badge-status ${String(node.status).toLowerCase()}`;
+        badge.textContent = String(node.status).replace('_', ' ');
+        stCell.appendChild(badge);
+      }
+      row.appendChild(stCell);
+
+      // Quick access: pin star + right-click menu on every row
+      if (node.path) row.dataset.path = node.path;
+      if (isPinnable(node)) {
+        const pin = document.createElement('button');
+        pin.className = 'node-pin' + (isPinned(node.path) ? ' pinned' : '');
+        pin.dataset.path = node.path;
+        pin.textContent = isPinned(node.path) ? '★' : '☆';
+        pin.title = isPinned(node.path) ? 'Unpin this folder' : 'Pin as quick folder / root';
+        pin.addEventListener('click', (e) => { e.stopPropagation(); togglePin(node); });
+        row.appendChild(pin);
+      }
+      row.addEventListener('contextmenu', (e) => openContextMenu(e, node));
+      // Branches / worktree checkouts: hover = diff infotip · click = Chrome → GitHub
+      const isBranch = node.type === 'branch_local' || node.type === 'branch_remote';
+      if (isBranch) {
+        row.classList.add('is-branch');
+        row.title = 'Hover: diff peek · Click: open on GitHub (Chrome)';
+        row.addEventListener('mouseenter', (e) => scheduleBranchInfotip(node, e));
+        row.addEventListener('mousemove', (e) => moveBranchInfotip(e));
+        row.addEventListener('mouseleave', () => hideBranchInfotip());
+        row.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          drillOrSelect(drillIndex, node);
+          openBranchOnGitHub(node);
+        });
+      } else {
+        row.addEventListener('click', () => drillOrSelect(drillIndex, node));
+      }
+      return row;
+    }
+
+    function nodeIconFor(node) {
+      if (node.type === 'repository') return { html: '📦', color: 'var(--accent)' };
+      if (node.type === 'branch_group') return { html: '🎋', color: 'var(--muted)' };
+      if (node.type === 'branch_local') return { html: '🌿', color: 'var(--branch-local)' };
+      if (node.type === 'branch_remote') return { html: '☁️', color: 'var(--branch-remote)' };
+      if (node.type === 'virtual_note') return { html: '📝', color: 'var(--virtual-color)' };
+      if (node.type === 'directory') return { html: '📁', color: 'var(--folder-color)' };
+      return { html: '📄', color: 'var(--file-color)' };
+    }
+
+    function renderFzfList(container) {
+      container.innerHTML = '';
+      const meta = document.createElement('div');
+      meta.className = 'fzf-meta';
+      const shown = fzfHits.length;
+      const capped = shown >= FZF_MAX ? ` · top ${FZF_MAX}` : '';
+      meta.textContent = shown
+        ? `${shown} match${shown === 1 ? '' : 'es'}${capped}  ·  ↑↓ move  ·  ↵ select  ·  esc clear`
+        : `0 matches for “${currentSearchTerm}”  ·  esc clear`;
+      container.appendChild(meta);
+
+      if (!fzfHits.length) {
+        const empty = document.createElement('div');
+        empty.className = 'fzf-empty';
+        empty.innerHTML = `No fuzzy hits.<br><span style="font-size:0.8rem">Try fewer chars or a path token — e.g. <code>ses api</code></span>`;
+        container.appendChild(empty);
+        return;
+      }
+
+      const ul = document.createElement('ul');
+      ul.className = 'fzf-list';
+      fzfHits.forEach((hit, i) => {
+        const li = document.createElement('li');
+        li.className = 'fzf-row';
+        if (i === fzfActiveIndex) li.classList.add('selected');
+        li.dataset.fzfIndex = String(i);
+
+        const ic = nodeIconFor(hit.node);
+        const icon = document.createElement('span');
+        icon.className = 'node-icon';
+        icon.innerHTML = ic.html;
+        icon.style.color = ic.color;
+        li.appendChild(icon);
+
+        const name = document.createElement('span');
+        name.className = 'fzf-name';
+        name.style.color = ic.color;
+        name.innerHTML = highlightPositions(hit.hayName, hit.namePos);
+        li.appendChild(name);
+
+        // same end-of-name terminator as the column rows
+        const sep = document.createElement('span');
+        sep.className = 'name-sep';
+        sep.textContent = ' -- ';
+        li.appendChild(sep);
+
+        if (hit.hayPath && hit.hayPath !== hit.hayName) {
+          const path = document.createElement('span');
+          path.className = 'fzf-path';
+          path.innerHTML = highlightPositions(hit.hayPath, hit.pathPos);
+          path.title = hit.node.path || hit.hayPath;
+          li.appendChild(path);
+        }
+
+        if (hit.node.status && hit.node.status !== 'NONE') {
+          const badge = document.createElement('span');
+          badge.className = `badge badge-status ${hit.node.status.toLowerCase()}`;
+          badge.textContent = hit.node.status.replace('_', ' ');
+          li.appendChild(badge);
+        }
+        const hitOrigin = nodeOrigin(hit.node);
+        if (hitOrigin) li.classList.add('origin-' + hitOrigin);
+        appendOriginBadge(li, hit.node);
+
+        li.addEventListener('click', () => {
+          fzfActiveIndex = i;
+          selectNode(hit.node, true);
+          // re-mark selected row without full re-render cost
+          ul.querySelectorAll('.fzf-row').forEach((r) => r.classList.remove('selected'));
+          li.classList.add('selected');
+        });
+        li.addEventListener('mouseenter', () => {
+          fzfActiveIndex = i;
+          ul.querySelectorAll('.fzf-row').forEach((r) => r.classList.remove('selected'));
+          li.classList.add('selected');
+        });
+
+        ul.appendChild(li);
+      });
+      container.appendChild(ul);
+
+      // Keep active row in view
+      const active = ul.querySelector('.fzf-row.selected');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    function fzfMove(delta) {
+      if (!currentSearchTerm || !fzfHits.length) return;
+      fzfActiveIndex = (fzfActiveIndex + delta + fzfHits.length) % fzfHits.length;
+      const rows = document.querySelectorAll('.fzf-row');
+      rows.forEach((r, i) => r.classList.toggle('selected', i === fzfActiveIndex));
+      const active = rows[fzfActiveIndex];
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    function fzfSelectActive() {
+      if (!currentSearchTerm || !fzfHits.length) return;
+      const hit = fzfHits[fzfActiveIndex];
+      if (!hit) return;
+      selectNode(hit.node, true);
+      // Stay in fzf mode so user can keep browsing; just confirm selection
+      const rows = document.querySelectorAll('.fzf-row');
+      rows.forEach((r, i) => r.classList.toggle('selected', i === fzfActiveIndex));
+    }
+
+    // Build DOM structure for a node recursively
+    function createNodeDom(node) {
+      const li = document.createElement('li');
+      li.className = 'tree-node-item';
+      
+      const row = document.createElement('div');
+      row.className = 'node-row';
+      if (selectedNode && (
+        (selectedNode.path && selectedNode.path === node.path && !node.key && !node.id) || 
+        (node.key && selectedNode.key === node.key) ||
+        (node.id && selectedNode.id === node.id)
+      )) {
+        row.classList.add('selected');
+      }
+
+      // 1. Arrow/Collapse Toggle button
+      const toggle = document.createElement('span');
+      toggle.className = 'node-toggle';
+      
+      const isLeaf = !node.children || node.children.length === 0;
+      if (isLeaf) {
+        toggle.classList.add('leaf');
+      } else {
+        const isCollapsed = !expandedPaths.has(node.path || node.name);
+        if (isCollapsed) {
+          toggle.classList.add('collapsed');
+        }
+        
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation(); // prevent node selection on arrow click
+          toggleCollapse(node, toggle);
+        });
+      }
+      toggle.innerHTML = '▼';
+      row.appendChild(toggle);
+
+      // 2. Icon
+      const ic = nodeIconFor(node);
+      const icon = document.createElement('span');
+      icon.className = 'node-icon';
+      icon.innerHTML = ic.html;
+      icon.style.color = ic.color;
+      row.appendChild(icon);
+
+      // 3. Name Label (tree mode — no query; fzf mode uses flat list)
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'node-name';
+      nameSpan.style.color = ic.color;
+      nameSpan.textContent = node.name;
+      row.appendChild(nameSpan);
+
+      // 4. Inject current branch pill if active HEAD
+      if (node.is_current) {
+        const headBadge = document.createElement('span');
+        headBadge.className = 'badge badge-current-head';
+        headBadge.textContent = 'Active HEAD';
+        row.appendChild(headBadge);
+      }
+
+      // 5. Progress Status badges next to name
+      if (node.status && node.status !== 'NONE') {
+        const statusBadge = document.createElement('span');
+        statusBadge.className = `badge badge-status ${node.status.toLowerCase()}`;
+        statusBadge.textContent = node.status.replace('_', ' ');
+        row.appendChild(statusBadge);
+      }
+      const rowOrigin = nodeOrigin(node);
+      if (rowOrigin) row.classList.add('origin-' + rowOrigin);
+      appendOriginBadge(row, node);
+
+      // Row Selection Click Event
+      row.addEventListener('click', () => {
+        selectNode(node, true);
+        
+        // Visual selection updates
+        document.querySelectorAll('.node-row').forEach(r => r.classList.remove('selected'));
+        row.classList.add('selected');
+      });
+
+      li.appendChild(row);
+
+      // 6. Child container if not a leaf
+      if (!isLeaf) {
+        const childContainer = document.createElement('ul');
+        childContainer.className = 'tree-node-list';
+        
+        const isCollapsed = !expandedPaths.has(node.path || node.name);
+        if (isCollapsed) {
+          childContainer.classList.add('collapsed-container');
+        }
+        
+        node.children.forEach(child => {
+          childContainer.appendChild(createNodeDom(child));
+        });
+        li.appendChild(childContainer);
+      }
+
+      return li;
+    }
+
+    // Toggle collapse state on folder click
+    function toggleCollapse(node, toggleElement) {
+      const parentLi = toggleElement.closest('.tree-node-item');
+      const childUl = parentLi.querySelector('ul.tree-node-list');
+      const nodeKey = node.path || node.name;
+      
+      if (expandedPaths.has(nodeKey)) {
+        expandedPaths.delete(nodeKey);
+        toggleElement.classList.add('collapsed');
+        if (childUl) childUl.classList.add('collapsed-container');
+      } else {
+        expandedPaths.add(nodeKey);
+        toggleElement.classList.remove('collapsed');
+        if (childUl) childUl.classList.remove('collapsed-container');
+      }
+      saveExpandedState();
+    }
+
+    // Auto-expand parents of search hits
+    function expandParents(node) {
+      // Walk up or find node in state and add parent paths to expandedPaths
+      // Since tree structure is loaded fully, we can gather ancestral paths of matching nodes
+      if (!treeData) return;
+      const paths = [];
+      
+      function searchParents(cur, targetPathOrKey, ancestralPaths) {
+        if ((cur.path === targetPathOrKey && !cur.key) || cur.key === targetPathOrKey || cur.id === targetPathOrKey) {
+          paths.push(...ancestralPaths);
+          return true;
+        }
+        if (cur.children) {
+          for (const c of cur.children) {
+            const nextAncestral = [...ancestralPaths, cur.path || cur.name];
+            if (searchParents(c, targetPathOrKey, nextAncestral)) return true;
+          }
+        }
+        return false;
+      }
+      
+      searchParents(treeData, node.path || node.key || node.id, []);
+      paths.forEach(p => expandedPaths.add(p));
+    }
+
+    // Select a node: tree window publishes; info window fills inspector
+    function selectNode(node, animate = true, fromRemote = false) {
+      selectedNode = node;
+      if (!fromRemote && !isInfoPane) {
+        publishSelection(node);
+      }
+      // Tree-only window: selection lives in the peer info window
+      if (!isInfoPane) return;
+
+      const container = document.getElementById('inspector-container');
+      if (!container) return;
+      
+      // Determine user-friendly type title
+      let nodeTypeTitle = node.type;
+      let parentPath = getParentPath(node);
+      
+      if (node.type === 'repository') nodeTypeTitle = 'Git Repository';
+      if (node.type === 'directory') nodeTypeTitle = 'Subdirectory Folder';
+      if (node.type === 'file') nodeTypeTitle = 'File Asset';
+      if (node.type === 'branch_local') nodeTypeTitle = 'Local Git Branch';
+      if (node.type === 'branch_remote') nodeTypeTitle = 'Remote Tracking Branch';
+      if (node.type === 'branch_group') nodeTypeTitle = 'Branches Catalog';
+      if (node.type === 'virtual_note') nodeTypeTitle = 'Planning Milestone / Note';
+
+      let html = `
+        <div class="inspector-header">
+          <h2 class="inspector-title">${escapeHtml(node.name)}</h2>
+          <div class="inspector-type">${nodeTypeTitle}</div>
+        </div>
+        
+        <div class="inspector-body">
+      `;
+
+      // 1. Metadata and Path details
+      if (node.path) {
+        html += `
+          <div class="form-group">
+            <span class="form-label">System Path</span>
+            <div style="font-family: ui-monospace, monospace; font-size: 0.8rem; background: var(--bg); padding: 8px; border-radius: 4px; word-break: break-all; border: 1px solid var(--line);">
+              ${escapeHtml(node.path)}
+            </div>
+          </div>
+        `;
+      }
+
+      const infoOrigin = nodeOrigin(node);
+      if (infoOrigin) {
+        const originNote = infoOrigin === 'you'
+          ? 'user-requested (you/) — keep'
+          : 'agent-suggested (agent/) — cull freely';
+        html += `
+          <div class="form-group">
+            <span class="form-label">Origin</span>
+            <div class="info-card" style="display:flex;align-items:center;gap:0.5rem;">
+              <span class="badge badge-origin ${infoOrigin}">${infoOrigin}</span>
+              <span style="font-size:0.78rem;color:var(--muted);">${escapeHtml(originNote)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      // 2. Active branch indicator for Repositories
+      if (node.type === 'repository' && node.current_branch) {
+        html += `
+          <div class="info-card">
+            Active Git Branch: <strong>🌿 ${escapeHtml(node.current_branch)}</strong>
+          </div>
+        `;
+      }
+
+      // 2b. Branch sneak-peek slot (remote/local) — filled async into info flip
+      if (node.type === 'branch_remote' || node.type === 'branch_local') {
+        html += `
+          <div class="branch-peek" id="branch-peek" data-repo="${escapeHtml(node.repo_path || '')}" data-ref="${escapeHtml(node.ref || node.name || '')}">
+            <div class="branch-peek-head">
+              <span class="bp-title">${node.type === 'branch_remote' ? 'Remote sneak-peek' : 'Branch sneak-peek'}</span>
+              <span class="bp-meta">vs HEAD · read-only</span>
+            </div>
+            <div class="bp-loading" id="branch-peek-body">Loading tip + commits + diff…</div>
+          </div>
+        `;
+      }
+
+      // 3. Render Status Progress pills (exclude branch group containers)
+      if (node.type !== 'branch_group') {
+        const statuses = [
+          { value: 'TODO', label: 'Todo' },
+          { value: 'IN_PROGRESS', label: 'In Progress' },
+          { value: 'BLOCKED', label: 'Blocked' },
+          { value: 'COMPLETED', label: 'Done' }
+        ];
+
+        html += `
+          <div class="form-group">
+            <span class="form-label">Status Mapping</span>
+            <div class="status-select-grid">
+        `;
+
+        statuses.forEach(st => {
+          const isActive = node.status === st.value;
+          html += `
+            <button class="status-btn ${isActive ? 'active ' + st.value.toLowerCase() : ''}" 
+                    onclick="updateNodeStatus('${st.value}')">
+              ${st.label}
+            </button>
+          `;
+        });
+
+        html += `
+            </div>
+          </div>
+        `;
+
+        // 4. Notes Text Area Editor
+        html += `
+          <div class="form-group">
+            <span class="form-label">Progress & Developer Notes</span>
+            <textarea id="notes-input" class="notes-textarea" placeholder="Add custom thoughts, steps to cover, tasks finished, or blocking issues here..." oninput="autoSaveNotes()">${escapeHtml(node.notes || '')}</textarea>
+            <div style="font-size: 0.72rem; color: var(--muted); text-align: right; margin-top: 2px;" id="save-status">Saved automatically</div>
+          </div>
+        `;
+      }
+
+      // 5. Actions group ("Add Milestones", "Create folders", etc.)
+      html += `<div class="action-group">`;
+      
+      if (node.type === 'directory' || node.type === 'repository') {
+        html += `
+          <button class="btn btn-secondary" style="width: 100%;" onclick="toggleExtenderForm('folder')">📁 Create Subfolder</button>
+          <div id="extender-folder-form" class="extender-form" style="display: none;">
+            <div class="extender-form-title">New Directory Under ${escapeHtml(node.name)}</div>
+            <input type="text" id="ext-folder-name" class="extender-input" placeholder="folder-name-here">
+            <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="createFolder()">Create Folder</button>
+          </div>
+        `;
+      }
+      
+      if (node.type === 'repository') {
+        html += `
+          <button class="btn btn-secondary" style="width: 100%;" onclick="toggleExtenderForm('branch')">🌿 Create New Branch</button>
+          <div id="extender-branch-form" class="extender-form" style="display: none;">
+            <div class="extender-form-title">Initialize Local Git Branch</div>
+            <input type="text" id="ext-branch-name" class="extender-input" placeholder="feature/your-branch-name">
+            <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="createBranch()">Create Branch</button>
+          </div>
+        `;
+      }
+
+      // Virtual planning milestones
+      if (node.type !== 'branch_group' && node.type !== 'virtual_note') {
+        html += `
+          <button class="btn btn-secondary" style="width: 100%;" onclick="toggleExtenderForm('virtual')">📝 Add Planning Milestone/Note</button>
+          <div id="extender-virtual-form" class="extender-form" style="display: none;">
+            <div class="extender-form-title">Add Virtual Note/Subtask</div>
+            <input type="text" id="ext-virtual-name" class="extender-input" placeholder="Task: Refactor tests...">
+            <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="createVirtualNode()">Add Note</button>
+          </div>
+        `;
+      }
+
+      // If it's a virtual node itself, allow editing name or deleting
+      if (node.type === 'virtual_note') {
+        html += `
+          <div class="form-group">
+            <span class="form-label">Rename Milestone</span>
+            <input type="text" id="virtual-rename-input" class="extender-input" value="${escapeHtml(node.name)}" oninput="renameVirtualNode()">
+          </div>
+          <button class="btn btn-danger" style="width: 100%; margin-top: 10px;" onclick="deleteVirtualNode()">🗑️ Delete Note</button>
+        `;
+      }
+
+      html += `</div></div>`; // End of body
+      container.innerHTML = html;
+
+      // Kick off branch sneak-peek after paint (info flip only)
+      if (node.type === 'branch_remote' || node.type === 'branch_local') {
+        loadBranchPeek(node);
+      }
+    }
+
+    let _branchPeekToken = 0;
+    let _infotipToken = 0;
+    let _infotipTimer = null;
+    let _infotipCache = new Map(); // key repo|ref → data
+
+    function ensureBranchInfotipEl() {
+      let el = document.getElementById('branch-infotip');
+      if (el) return el;
+      el = document.createElement('div');
+      el.id = 'branch-infotip';
+      el.setAttribute('role', 'tooltip');
+      document.body.appendChild(el);
+      return el;
+    }
+
+    function hideBranchInfotip() {
+      if (_infotipTimer) {
+        clearTimeout(_infotipTimer);
+        _infotipTimer = null;
+      }
+      _infotipToken++;
+      const el = document.getElementById('branch-infotip');
+      if (el) el.classList.remove('show');
+    }
+
+    function moveBranchInfotip(e) {
+      const el = document.getElementById('branch-infotip');
+      if (!el || !el.classList.contains('show')) return;
+      placeInfotip(el, e.clientX, e.clientY);
+    }
+
+    function placeInfotip(el, x, y) {
+      const pad = 14;
+      const w = el.offsetWidth || 420;
+      const h = el.offsetHeight || 200;
+      let left = x + pad;
+      let top = y + pad;
+      if (left + w > window.innerWidth - 8) left = Math.max(8, x - w - pad);
+      if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+    }
+
+    function scheduleBranchInfotip(node, e) {
+      if (_infotipTimer) clearTimeout(_infotipTimer);
+      const cx = e.clientX;
+      const cy = e.clientY;
+      _infotipTimer = setTimeout(() => showBranchInfotip(node, cx, cy), 280);
+    }
+
+    async function showBranchInfotip(node, x, y) {
+      const el = ensureBranchInfotipEl();
+      const repo = node.repo_path || '';
+      const ref = node.ref || node.name || '';
+      if (!repo || !ref) return;
+      const token = ++_infotipToken;
+      const cacheKey = repo + '|' + ref;
+      el.innerHTML = '<div class="bit-body"><span class="bit-meta">Loading diff…</span></div>';
+      el.classList.add('show');
+      placeInfotip(el, x, y);
+
+      let data = _infotipCache.get(cacheKey);
+      if (!data) {
+        try {
+          // compact patch for tip speed
+          const u = '/api/aytree/branch-preview?repo=' + encodeURIComponent(repo)
+            + '&ref=' + encodeURIComponent(ref);
+          const res = await fetch(u, { cache: 'no-store' });
+          data = await res.json();
+          if (data && data.ok) _infotipCache.set(cacheKey, data);
+        } catch (err) {
+          if (token !== _infotipToken) return;
+          el.innerHTML = '<div class="bit-err">peek failed</div>';
+          placeInfotip(el, x, y);
+          return;
+        }
+      }
+      if (token !== _infotipToken) return;
+      if (!data || !data.ok) {
+        el.innerHTML = '<div class="bit-err">' + escapeHtml((data && data.error) || 'preview failed') + '</div>';
+        placeInfotip(el, x, y);
+        return;
+      }
+
+      let head = '<div class="bit-head">';
+      head += '<span class="bit-title">' + escapeHtml(data.ref_display || ref) + '</span>';
+      if (data.same_as_base) {
+        head += '<span class="bp-chip same">same as HEAD</span>';
+      } else {
+        head += '<span class="bp-chip ahead">+' + (data.ahead || 0) + '</span>';
+        head += '<span class="bp-chip behind">−' + (data.behind || 0) + '</span>';
+      }
+      head += '<span class="bit-meta">vs HEAD · click → GitHub</span>';
+      head += '</div>';
+
+      let body = '<div class="bit-body">';
+      if (data.tip && data.tip.subject) {
+        body += '<div class="bp-tip"><span class="sha">' + escapeHtml(data.tip.short || '') + '</span> · '
+          + escapeHtml(data.tip.subject) + '</div>';
+      }
+      if (data.stat && String(data.stat).trim()) {
+        // first ~12 lines of stat for tip
+        const statLines = String(data.stat).trim().split('\n').slice(0, 12).join('\n');
+        body += '<div class="bp-section-label">Files</div>';
+        body += '<pre class="bit-stat">' + escapeHtml(statLines) + '</pre>';
+      }
+      if (data.patch && String(data.patch).trim()) {
+        const patchLines = String(data.patch).split('\n').slice(0, 40).join('\n');
+        body += '<div class="bp-section-label">Diff</div>';
+        body += '<pre class="bit-patch">' + colorizeDiff(patchLines) + '</pre>';
+      } else if (!data.same_as_base) {
+        body += '<div class="bit-meta">No patch lines (empty range or binary-only).</div>';
+      }
+      const gh = data.github;
+      if (gh && gh.ok && gh.url) {
+        body += '<div class="bit-hint">Click opens Chrome → ' + escapeHtml(gh.url) + '</div>';
+      } else if (gh && !gh.ok) {
+        body += '<div class="bit-hint">No GitHub remote: ' + escapeHtml(gh.error || '') + '</div>';
+      }
+      body += '</div>';
+      el.innerHTML = head + body;
+      placeInfotip(el, x, y);
+    }
+
+    async function openBranchOnGitHub(node) {
+      const repo = node.repo_path || '';
+      const ref = node.ref || node.name || '';
+      if (!repo || !ref) return;
+      hideBranchInfotip();
+      let url = null;
+      const cacheKey = repo + '|' + ref;
+      const cached = _infotipCache.get(cacheKey);
+      if (cached && cached.github && cached.github.ok && cached.github.url) {
+        url = cached.github.url;
+      } else {
+        try {
+          const u = '/api/aytree/github-url?repo=' + encodeURIComponent(repo)
+            + '&ref=' + encodeURIComponent(ref);
+          const res = await fetch(u, { cache: 'no-store' });
+          const data = await res.json();
+          if (data && data.ok) url = data.url || data.compare_url || data.tree_url;
+          else {
+            console.warn('github-url', data && data.error);
+            return;
+          }
+        } catch (e) {
+          console.warn('github-url failed', e);
+          return;
+        }
+      }
+      if (!url) return;
+      try {
+        const openU = '/api/aytree/open-chrome?url=' + encodeURIComponent(url);
+        const res = await fetch(openU, { cache: 'no-store' });
+        const data = await res.json();
+        if (!data || !data.ok) {
+          // last resort: new tab (may not be Chrome in webview)
+          window.open(url, '_blank', 'noopener');
+        }
+      } catch (_) {
+        window.open(url, '_blank', 'noopener');
+      }
+    }
+
+    function colorizeDiff(patch) {
+      if (!patch) return '';
+      return String(patch).split('\n').map((line) => {
+        const e = escapeHtml(line);
+        if (line.startsWith('+++') || line.startsWith('---')) return `<span class="meta">${e}</span>`;
+        if (line.startsWith('@@')) return `<span class="hdr">${e}</span>`;
+        if (line.startsWith('+')) return `<span class="add">${e}</span>`;
+        if (line.startsWith('-')) return `<span class="del">${e}</span>`;
+        return e;
+      }).join('\n');
+    }
+
+    async function loadBranchPeek(node) {
+      const token = ++_branchPeekToken;
+      const body = document.getElementById('branch-peek-body');
+      const wrap = document.getElementById('branch-peek');
+      if (!body) return;
+      const repo = node.repo_path || (wrap && wrap.dataset.repo) || '';
+      const ref = node.ref || node.name || (wrap && wrap.dataset.ref) || '';
+      if (!repo || !ref) {
+        body.className = 'bp-err';
+        body.textContent = 'No repo path on this branch node — rescan tree (serve may be stale).';
+        return;
+      }
+      try {
+        const u = '/api/aytree/branch-preview?repo=' + encodeURIComponent(repo)
+          + '&ref=' + encodeURIComponent(ref);
+        const res = await fetch(u, { cache: 'no-store' });
+        const data = await res.json();
+        if (token !== _branchPeekToken) return; // stale selection
+        if (!data || !data.ok) {
+          body.className = 'bp-err';
+          body.textContent = (data && data.error) || 'preview failed';
+          return;
+        }
+        let html = '';
+        html += `<div class="branch-peek-chips">`;
+        if (data.same_as_base) {
+          html += `<span class="bp-chip same">same as ${escapeHtml(data.base || 'HEAD')}</span>`;
+        } else {
+          html += `<span class="bp-chip ahead">+${data.ahead || 0} ahead</span>`;
+          html += `<span class="bp-chip behind">−${data.behind || 0} behind</span>`;
+        }
+        html += `<span class="bp-chip">${escapeHtml(data.ref_display || data.ref || ref)} · ${escapeHtml(data.base || 'HEAD')}</span>`;
+        html += `</div>`;
+
+        if (data.tip && data.tip.subject) {
+          html += `<div class="bp-tip"><span class="sha">${escapeHtml(data.tip.short || '')}</span> · ${escapeHtml(data.tip.subject)}`
+            + `<div style="font-size:0.72rem;color:var(--muted);margin-top:2px">${escapeHtml(data.tip.author || '')} · ${escapeHtml(data.tip.rel_date || '')}</div></div>`;
+        }
+
+        const commits = data.commits || [];
+        if (commits.length) {
+          html += `<div class="bp-section-label">Commits on this side (${commits.length}${data.ahead > commits.length ? '+' : ''})</div>`;
+          html += `<ul class="bp-commits">`;
+          commits.forEach((c) => {
+            html += `<li><span class="h">${escapeHtml(c.short || '')}</span><span class="d">${escapeHtml(c.rel_date || '')}</span><span class="s" title="${escapeHtml(c.subject || '')}">${escapeHtml(c.subject || '')}</span></li>`;
+          });
+          html += `</ul>`;
+        } else if (!data.same_as_base) {
+          html += `<div class="bp-note">No unique commits vs ${escapeHtml(data.base || 'HEAD')} (maybe only behind, or empty range).</div>`;
+        }
+
+        if (data.stat && String(data.stat).trim()) {
+          html += `<div class="bp-section-label">Files changed</div>`;
+          html += `<pre class="bp-stat">${escapeHtml(data.stat)}</pre>`;
+        }
+
+        if (data.patch && String(data.patch).trim()) {
+          html += `<div class="bp-section-label">Diff${data.patch_truncated ? ' (truncated)' : ''}</div>`;
+          html += `<pre class="bp-patch">${colorizeDiff(data.patch)}</pre>`;
+          if (data.patch_truncated) {
+            html += `<div class="bp-note">Patch truncated for speed — full diff lives in git.</div>`;
+          }
+        } else if (!data.same_as_base && !(data.stat && String(data.stat).trim())) {
+          html += `<div class="bp-note">No file diff vs ${escapeHtml(data.base || 'HEAD')}.</div>`;
+        }
+
+        html += `<div class="bp-note">Local objects only · does not fetch · does not checkout.</div>`;
+        body.className = '';
+        body.innerHTML = html;
+      } catch (e) {
+        if (token !== _branchPeekToken) return;
+        body.className = 'bp-err';
+        body.textContent = 'peek failed: ' + (e && e.message ? e.message : e);
+      }
+    }
+
+    // Helper: Determine node parent path
+    function getParentPath(node) {
+      if (node.rel_path) {
+        const parts = node.rel_path.split('/');
+        parts.pop();
+        return parts.join('/');
+      }
+      return '';
+    }
+
+    // Toggle extender sub-form visibilities
+    function toggleExtenderForm(formType) {
+      const form = document.getElementById(`extender-${formType}-form`);
+      if (form) {
+        const isHidden = form.style.display === 'none';
+        // Hide all forms first
+        document.querySelectorAll('.extender-form').forEach(f => f.style.display = 'none');
+        form.style.display = isHidden ? 'flex' : 'none';
+        
+        // Auto-focus inputs
+        if (isHidden) {
+          const input = form.querySelector('input');
+          if (input) input.focus();
+        }
+      }
+    }
+
+    // Auto save notes on text typing (debounce)
+    let autoSaveTimeout = null;
+    function autoSaveNotes() {
+      const statusLabel = document.getElementById('save-status');
+      if (statusLabel) statusLabel.textContent = 'Saving...';
+      
+      clearTimeout(autoSaveTimeout);
+      autoSaveTimeout = setTimeout(async () => {
+        const notesValue = document.getElementById('notes-input').value;
+        const key = selectedNode.rel_path !== undefined ? selectedNode.rel_path : (selectedNode.key || selectedNode.id);
+        const isVirtual = selectedNode.type === 'virtual_note';
+        
+        const payload = {
+          key: key,
+          notes: notesValue,
+          status: selectedNode.status || 'NONE',
+          is_virtual: isVirtual
+        };
+
+        if (isVirtual) {
+          // Find virtual node parent
+          payload.parent_key = getVirtualParentKey(selectedNode.id);
+          payload.name = selectedNode.name;
+        }
+
+        try {
+          const res = await fetch('/api/aytree/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const result = await res.json();
+          if (result.success) {
+            selectedNode.notes = notesValue;
+            publishSelection(selectedNode);
+            if (statusLabel) statusLabel.textContent = 'Saved';
+          } else {
+            if (statusLabel) statusLabel.textContent = 'Save Error: ' + result.error;
+          }
+        } catch (e) {
+          if (statusLabel) statusLabel.textContent = 'Network Error';
+        }
+      }, 500);
+    }
+
+    // Update active node's status tag
+    async function updateNodeStatus(statusValue) {
+      // Toggle off if clicking the active one
+      const targetStatus = selectedNode.status === statusValue ? 'NONE' : statusValue;
+      const key = selectedNode.rel_path !== undefined ? selectedNode.rel_path : (selectedNode.key || selectedNode.id);
+      const isVirtual = selectedNode.type === 'virtual_note';
+      
+      const payload = {
+        key: key,
+        notes: selectedNode.notes || '',
+        status: targetStatus,
+        is_virtual: isVirtual
+      };
+
+      if (isVirtual) {
+        payload.parent_key = getVirtualParentKey(selectedNode.id);
+        payload.name = selectedNode.name;
+      }
+
+      try {
+        const res = await fetch('/api/aytree/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (result.success) {
+          selectedNode.status = targetStatus;
+          publishSelection(selectedNode);
+          publishTreeRefresh();
+          // Re-sync tree structure from backend to show new status badge
+          await fetchTreeData();
+        } else {
+          alert('Failed to update status: ' + result.error);
+        }
+      } catch (e) {
+        alert('Network Error while updating status');
+      }
+    }
+
+    // Find parent container key of a virtual node
+    function getVirtualParentKey(nodeId) {
+      let foundKey = 'root';
+      
+      function search(cur) {
+        if (cur.children) {
+          for (const c of cur.children) {
+            if (c.id === nodeId && c.type === 'virtual_note') {
+              foundKey = cur.rel_path !== undefined ? cur.rel_path : 'root';
+              return true;
+            }
+            if (search(c)) return true;
+          }
+        }
+        return false;
+      }
+      
+      if (treeData) search(treeData);
+      return foundKey;
+    }
+
+    // Physical Folder creation
+    async function createFolder() {
+      const folderInput = document.getElementById('ext-folder-name');
+      const folderName = folderInput.value.trim();
+      if (!folderName) return alert('Folder name cannot be empty');
+      
+      try {
+        const res = await fetch('/api/aytree/extend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create_folder',
+            parent_path: selectedNode.path,
+            folder_name: folderName
+          })
+        });
+        const result = await res.json();
+        if (result.success) {
+          folderInput.value = '';
+          toggleExtenderForm('folder');
+          expandedPaths.add(selectedNode.path || selectedNode.name); // Ensure parent is expanded
+          publishTreeRefresh();
+          await fetchTreeData();
+        } else {
+          alert('Error: ' + result.error);
+        }
+      } catch (e) {
+        alert('Network Error while creating folder');
+      }
+    }
+
+    // Physical Git branch creation
+    async function createBranch() {
+      const branchInput = document.getElementById('ext-branch-name');
+      const branchName = branchInput.value.trim();
+      if (!branchName) return alert('Branch name cannot be empty');
+      
+      try {
+        const res = await fetch('/api/aytree/extend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create_branch',
+            repo_path: selectedNode.path,
+            branch_name: branchName
+          })
+        });
+        const result = await res.json();
+        if (result.success) {
+          branchInput.value = '';
+          toggleExtenderForm('branch');
+          expandedPaths.add(selectedNode.path || selectedNode.name); // expand repo
+          // Also try expanding branches node group if we find it
+          publishTreeRefresh();
+          await fetchTreeData();
+        } else {
+          alert('Error: ' + result.error);
+        }
+      } catch (e) {
+        alert('Network Error while creating branch');
+      }
+    }
+
+    // Create a virtual planning subtask/note
+    async function createVirtualNode() {
+      const virtualInput = document.getElementById('ext-virtual-name');
+      const virtualName = virtualInput.value.trim();
+      if (!virtualName) return alert('Milestone name cannot be empty');
+      
+      const parentKey = selectedNode.rel_path !== undefined ? selectedNode.rel_path : 'root';
+      const syntheticId = 'virtual-' + Date.now();
+      
+      try {
+        const res = await fetch('/api/aytree/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            key: syntheticId,
+            name: virtualName,
+            notes: '',
+            status: 'NONE',
+            is_virtual: true,
+            parent_key: parentKey
+          })
+        });
+        const result = await res.json();
+        if (result.success) {
+          virtualInput.value = '';
+          toggleExtenderForm('virtual');
+          expandedPaths.add(selectedNode.path || selectedNode.name); // ensure expanded
+          publishTreeRefresh();
+          await fetchTreeData();
+        } else {
+          alert('Error: ' + result.error);
+        }
+      } catch (e) {
+        alert('Network Error while adding milestone');
+      }
+    }
+
+    // Rename a virtual node in real-time
+    let renameTimeout = null;
+    function renameVirtualNode() {
+      clearTimeout(renameTimeout);
+      const nameInput = document.getElementById('virtual-rename-input');
+      const newName = nameInput.value.trim();
+      if (!newName) return;
+      
+      renameTimeout = setTimeout(async () => {
+        const parentKey = getVirtualParentKey(selectedNode.id);
+        try {
+          const res = await fetch('/api/aytree/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              key: selectedNode.id,
+              name: newName,
+              notes: selectedNode.notes || '',
+              status: selectedNode.status || 'NONE',
+              is_virtual: true,
+              parent_key: parentKey
+            })
+          });
+          const result = await res.json();
+          if (result.success) {
+            selectedNode.name = newName;
+            publishSelection(selectedNode);
+            publishTreeRefresh();
+            
+            // Re-sync tree silently or update title
+            const titleEl = document.querySelector('.inspector-title');
+            if (titleEl) titleEl.textContent = newName;
+            
+            // Redraw tree representation to show updated name
+            renderTree();
+          }
+        } catch (e) {
+          console.error("Virtual rename failed:", e);
+        }
+      }, 500);
+    }
+
+    // Delete a virtual milestone node
+    async function deleteVirtualNode() {
+      if (!confirm(`Are you sure you want to delete the milestone "${selectedNode.name}"?`)) return;
+      
+      const parentKey = getVirtualParentKey(selectedNode.id);
+      try {
+        const res = await fetch('/api/aytree/extend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'delete_virtual',
+            id: selectedNode.id,
+            parent_key: parentKey
+          })
+        });
+        const result = await res.json();
+        if (result.success) {
+          // Clear selection in info window + tree highlight
+          document.getElementById('inspector-container').innerHTML = `
+            <div class="empty-inspector">
+              <div class="empty-icon">🌿</div>
+              <div class="empty-text">Click any repository, folder, file, branch, or custom milestone in the tree window above to view metadata, add notes, and map your progress.</div>
+            </div>
+          `;
+          selectedNode = null;
+          publishSelection(null);
+          publishTreeRefresh();
+          await fetchTreeData();
+        } else {
+          alert('Error: ' + result.error);
+        }
+      } catch (e) {
+        alert('Network Error while deleting note');
+      }
+    }
+
+    // Substring Sanitizer
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+    }
+
+    function applyRemoteMessage(msg) {
+      if (!msg || !msg.type) return;
+      if (msg.type === 'select' && isInfoPane && msg.node) {
+        selectNode(msg.node, false, true);
+      } else if (msg.type === 'clear' && isInfoPane) {
+        selectedNode = null;
+        const c = document.getElementById('inspector-container');
+        if (c) {
+          c.innerHTML = `
+            <div class="empty-inspector">
+              <div class="empty-icon">🌿</div>
+              <div class="empty-text">Click any repository, folder, file, branch, or custom milestone in the tree window above to view metadata, add notes, and map your progress.</div>
+            </div>`;
+        }
+      } else if (msg.type === 'refresh' && !isInfoPane) {
+        fetchTreeData();
+      } else if (msg.type === 'pins' && !isInfoPane) {
+        hydratePins();
+      }
+    }
+
+    if (aytreeBc) {
+      aytreeBc.onmessage = (ev) => applyRemoteMessage(ev.data);
+    }
+    window.addEventListener('storage', (e) => {
+      if (e.key === AYTREE_LS_KEY && e.newValue) {
+        try { applyRemoteMessage(JSON.parse(e.newValue)); } catch (_) {}
+      }
+      if (e.key === 'aytree_tree_refresh' && !isInfoPane) {
+        fetchTreeData();
+      }
+    });
+
+    // Search input handler (tree window only) — fzf fuzzy, not substring filter
+    const searchInput = document.getElementById('search-input');
+    const quickPlus = document.getElementById('quick-plus');
+    if (quickPlus && !isInfoPane) {
+      quickPlus.addEventListener('click', () => startPathAdd());
+    }
+    if (!isInfoPane) renderQuickTabs();
+
+    if (searchInput && !isInfoPane) {
+      searchInput.addEventListener('input', () => {
+        // Debounce fzf — avoid re-flattening the whole tree every keystroke
+        const raw = searchInput.value;
+        if (fzfDebounceTimer) clearTimeout(fzfDebounceTimer);
+        fzfDebounceTimer = setTimeout(() => {
+          fzfDebounceTimer = null;
+          currentSearchTerm = raw.trim();
+          runFzf(currentSearchTerm);
+          renderTree();
+        }, currentSearchTerm || raw.trim() ? 140 : 40);
+      });
+      // Block arrow keys from moving caret when list is active — fzf nav owns them
+      searchInput.addEventListener('keydown', (e) => {
+        if (!currentSearchTerm) return;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+          e.preventDefault();
+          if (e.key === 'ArrowDown') fzfMove(1);
+          else if (e.key === 'ArrowUp') fzfMove(-1);
+          else fzfSelectActive();
+        }
+      });
+    }
+
+    // Global keyboard: / focus, esc clear, ctrl-j/k when not in other inputs
+    window.addEventListener('keydown', (e) => {
+      if (!searchInput || isInfoPane) return;
+      const pathAdd = document.getElementById('path-add-input');
+      if (pathAdd && document.activeElement === pathAdd) return; // path entry owns keys
+      const inOtherField = e.target && e.target !== searchInput
+        && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
+      if (inOtherField) return;
+
+      // Quick access: Alt+1..9 → nth pinned folder, bare p → pin/unpin selection
+      if (e.altKey && /^[1-9]$/.test(e.key)) {
+        const q = quickFolders[Number(e.key) - 1];
+        if (q) { e.preventDefault(); revealPath(q.path); }
+        return;
+      }
+      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.altKey && !e.metaKey
+          && !currentSearchTerm && document.activeElement !== searchInput) {
+        e.preventDefault();
+        pinSelected();
+        return;
+      }
+
+      if (e.key === '/' && document.activeElement !== searchInput) {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (pathAddMode) {
+          e.preventDefault();
+          cancelPathAdd();
+          return;
+        }
+        if (currentSearchTerm || document.activeElement === searchInput) {
+          e.preventDefault();
+          searchInput.value = '';
+          currentSearchTerm = '';
+          fzfHits = [];
+          fzfActiveIndex = 0;
+          searchInput.blur();
+          renderTree();
+        }
+        return;
+      }
+      // fzf nav even when focus left the input (clicked a row)
+      if (currentSearchTerm && fzfHits.length) {
+        if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n') || e.key === 'j' && document.activeElement !== searchInput) {
+          e.preventDefault();
+          fzfMove(1);
+        } else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p') || e.key === 'k' && document.activeElement !== searchInput) {
+          e.preventDefault();
+          fzfMove(-1);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          fzfSelectActive();
+        }
+      }
+    });
+
+    // Boot
+    if (isInfoPane) {
+      // Restore last selection from tree peer (if any)
+      try {
+        const raw = localStorage.getItem(AYTREE_LS_KEY);
+        if (raw) applyRemoteMessage(JSON.parse(raw));
+      } catch (_) {}
+      // Silent tree cache (no render) so virtual-note parent keys resolve on save/delete
+      fetchTreeData();
+    } else {
+      // Quick access rail: restore visibility, pull pins from the server, recents
+      try {
+        if (localStorage.getItem(QA_HIDDEN_LS) === '1') {
+          document.getElementById('qa-panel').classList.add('hidden');
+          document.getElementById('qa-toggle').classList.remove('on');
+        }
+      } catch (e) {}
+      renderQuickAccess();
+      hydratePins();
+      fetchTreeData();
+      // Quiet poll — only re-render when fingerprint changes (no rapid flicker)
+      setInterval(() => fetchTreeData({ quiet: true }), 25000);
+    }
+  </script>
+
+<script src="/type-scale.js"></script>
+<script src="/cth-hover.js"></script>
+<script src="/suite-zip.js?v=9"></script>
+</body>
+</html>
