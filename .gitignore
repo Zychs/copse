@@ -1,0 +1,13 @@
+# v1.1 harden
+.env
+.env.*
+auth.json
+credentials.json
+*.pem
+*.p12
+id_ed25519
+id_rsa
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

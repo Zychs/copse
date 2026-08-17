@@ -47,7 +47,7 @@ only, one click to pin).
 
 ## Config
 
-- `AYTREE_SCAN_ROOT` — directory to map (default: `C:\Users\bardw\dev` if present)
+- `AYTREE_SCAN_ROOT` — directory to map (default: `%USERPROFILE%\dev` if present)
 - `AYTREE_NOTES` — notes JSON path (default: `%USERPROFILE%\.artifact-scanner\aytree_notes.json`)
 
 ## Integration (Artifact Scanner)
@@ -78,5 +78,5 @@ Path segments `you` · `user` · `user-requested` vs `agent` · `agent-suggested
 API field `origin`; rows get green **you** badge / muted italic **agent** badge; sort you first, agent last.  
 Law: `~/jwrangle/YOU-AGENT.md`.
 
-Standalone AyTree repo remains at `C:\Users\bardw\dev\AyTree` (canonical product tree).  
+Standalone AyTree repo remains at `%USERPROFILE%\dev\AyTree` (canonical product tree).  
 This module is the scanner-hosted copy for day-to-day + feature hooks.

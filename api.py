@@ -35,13 +35,12 @@ if sys.platform == "win32":
     )
 
 # Scan root: prefer env, else ~/dev (this machine's primary dev drive sibling).
-# Same "scan my siblings" intent as standalone AyTree under C:\Users\bardw\dev\AyTree.
+# Same "scan my siblings" intent as standalone AyTree under %USERPROFILE%\dev\AyTree.
 def _default_scan_root() -> Path:
     env = os.environ.get("AYTREE_SCAN_ROOT")
     if env:
         return Path(env).expanduser().resolve()
     candidates = [
-        Path(r"C:\Users\bardw\dev"),
         Path(r"C:\dev"),
         _HOME / "dev",
         _HOME,
